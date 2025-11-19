@@ -1,4 +1,3 @@
-cat > commission.py << 'EOF'
 import re
 import json
 
@@ -161,5 +160,3 @@ Available Sources:
 - RSOC
 """
     return json.dumps({"text": message})
-EOF
-
