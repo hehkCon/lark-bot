@@ -2,6 +2,7 @@
 import os
 import logging
 import requests
+import json
 
 APP_ID = os.getenv("APP_ID")
 APP_SECRET = os.getenv("APP_SECRET")
@@ -26,7 +27,6 @@ class MessageApiClient(object):
         self.send("open_id", open_id, "text", content)
 
     def send(self, receive_id_type, receive_id, msg_type, content):
-        # send message to user, implemented based on Feishu open api capability. doc link: https://open.feishu.cn/document/uAjLw4CM/ukTMukTMukTM/reference/im-v1/message/create
         self._authorize_tenant_access_token()
         url = "{}{}?receive_id_type={}".format(
             self._lark_host, MESSAGE_URI, receive_id_type
@@ -36,16 +36,25 @@ class MessageApiClient(object):
             "Authorization": "Bearer " + self.tenant_access_token,
         }
 
+        # Properly format the content as a JSON string for text messages
+        if msg_type == "text" and isinstance(content, str):
+            msg_content = json.dumps({"text": content})
+        else:
+            msg_content = json.dumps(content)
+
         req_body = {
             "receive_id": receive_id,
-            "content": content,
+            "content": msg_content,
             "msg_type": msg_type,
         }
+
+        # Debug output to verify request payload
+        logging.debug(f"POST {url} payload: {req_body}")
+
         resp = requests.post(url=url, headers=headers, json=req_body)
         MessageApiClient._check_error_response(resp)
 
     def _authorize_tenant_access_token(self):
-        # get tenant_access_token and set, implemented based on Feishu open api capability. doc link: https://open.feishu.cn/document/ukTMukTMukTM/ukDNz4SO0MjL5QzM/auth-v3/auth/tenant_access_token_internal
         url = "{}{}".format(self._lark_host, TENANT_ACCESS_TOKEN_URI)
         req_body = {"app_id": self._app_id, "app_secret": self._app_secret}
         response = requests.post(url, req_body)
@@ -54,7 +63,6 @@ class MessageApiClient(object):
 
     @staticmethod
     def _check_error_response(resp):
-        # check if the response contains error information
         if resp.status_code != 200:
             resp.raise_for_status()
         response_dict = resp.json()
@@ -73,3 +81,4 @@ class LarkException(Exception):
         return "{}:{}".format(self.code, self.msg)
 
     __repr__ = __str__
+
