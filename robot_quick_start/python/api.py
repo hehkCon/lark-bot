@@ -21,6 +21,7 @@ class TokenManager:
         self.token = None
         self.expiry_time = 0
         self.lock = threading.Lock()
+        print(f"DEBUG: TokenManager initialized with app_id length={len(app_id)}, host={host}")
 
     def fetch_token(self):
         url = f"{self.host}{TENANT_ACCESS_TOKEN_URI}"
@@ -33,11 +34,12 @@ class TokenManager:
         with self.lock:
             self.token = data.get("tenant_access_token")
             self.expiry_time = time.time() + data.get("expire", 7200) - 120  # refresh 2 mins early
-        print(f"DEBUG: Token fetched, expires at {self.expiry_time}")
+        print(f"DEBUG: Fetched tenant_access_token: {self.token}, expires at {self.expiry_time}")
 
     def get_token(self):
         with self.lock:
             if not self.token or time.time() > self.expiry_time:
+                print("DEBUG: Token expired or not fetched, fetching new one")
                 self.fetch_token()
             return self.token
 
@@ -70,12 +72,15 @@ class MessageApiClient(object):
         self.send("open_id", open_id, "text", content)
 
     def send(self, receive_id_type, receive_id, msg_type, content):
+        token = self.tenant_access_token
+        print(f"DEBUG: Authorization header token: {token}")
+
         url = "{}{}?receive_id_type={}".format(
             self._lark_host, MESSAGE_URI, receive_id_type
         )
         headers = {
             "Content-Type": "application/json",
-            "Authorization": "Bearer " + self.tenant_access_token,
+            "Authorization": "Bearer " + token,
         }
 
         if msg_type == "text" and isinstance(content, str):
@@ -89,7 +94,7 @@ class MessageApiClient(object):
             "msg_type": msg_type,
         }
 
-        print(f"DEBUG: Sending message to {receive_id} with token {self.tenant_access_token}")
+        print(f"DEBUG: Sending message to {receive_id} with payload: {req_body}")
         resp = requests.post(url=url, headers=headers, json=req_body)
         MessageApiClient._check_error_response(resp)
 
@@ -112,7 +117,4 @@ class LarkException(Exception):
         return "{}:{}".format(self.code, self.msg)
 
     __repr__ = __str__
-
-# Example usage initialization for your app (adjust as needed):
-# message_api_client = MessageApiClient(APP_ID, APP_SECRET, LARK_HOST)
 
