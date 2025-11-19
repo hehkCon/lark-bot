@@ -24,6 +24,9 @@ COMMISSION_RATES = {
 
 def calculate_commission(text):
     text = text.strip()
+    if text.lower() == "help":
+        return get_help_message()
+
     if len(text) == 0:
         return get_help_message()
 
