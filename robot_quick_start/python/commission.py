@@ -1,3 +1,4 @@
+cat > commission.py << 'EOF'
 import re
 import json
 
@@ -53,7 +54,8 @@ def calculate_commission(text):
             break
     
     if not source:
-        return f"❌ Invalid source. Available sources: {', '.join(COMMISSION_RATES.keys())}\n\n{get_help_message()}"
+        error_msg = f"❌ Invalid source. Available sources: {', '.join(COMMISSION_RATES.keys())}\n\n{get_help_message()}"
+        return json.dumps({"text": error_msg})
     
     # Calculate based on source type
     rate_config = COMMISSION_RATES[source]
@@ -61,7 +63,8 @@ def calculate_commission(text):
     
     if calc_type == "Spend %":
         if len(values) < 2:
-            return f"❌ For {source}, please provide: revenue and spend\nExample: {source} 1000 200"
+            error_msg = f"❌ For {source}, please provide: revenue and spend\nExample: {source} 1000 200"
+            return json.dumps({"text": error_msg})
         
         revenue = values[0]
         spend = values[1]
@@ -75,7 +78,8 @@ def calculate_commission(text):
                 break
         
         if not matching_tier:
-            return f"❌ No matching commission tier for {spend_pct:.2f}% spend"
+            error_msg = f"❌ No matching commission tier for {spend_pct:.2f}% spend"
+            return json.dumps({"text": error_msg})
         
         commission = revenue * (matching_tier["revenue_rate"] / 100)
         buyer_commission = revenue * (matching_tier["buyer_commission"] / 100)
@@ -84,7 +88,8 @@ def calculate_commission(text):
     
     elif calc_type == "Profit":
         if len(values) < 1:
-            return f"❌ For {source}, please provide: profit\nExample: {source} 50"
+            error_msg = f"❌ For {source}, please provide: profit\nExample: {source} 50"
+            return json.dumps({"text": error_msg})
         
         profit = values[0]
         
@@ -96,13 +101,14 @@ def calculate_commission(text):
                 break
         
         if not matching_tier:
-            return f"❌ No matching commission tier for ${profit:.2f} profit"
+            error_msg = f"❌ No matching commission tier for ${profit:.2f} profit"
+            return json.dumps({"text": error_msg})
         
         commission = profit * (matching_tier["revenue_rate"] / 100)
         
         return format_profit_result(source, profit, commission, matching_tier)
     
-    return "❌ Unknown calculation type"
+    return json.dumps({"text": "❌ Unknown calculation type"})
 
 def is_number(s):
     try:
@@ -112,44 +118,48 @@ def is_number(s):
         return False
 
 def format_result(source, revenue, spend, spend_pct, commission, buyer_commission, tier):
-    return f"""✅ **Commission Calculation**
+    message = f"""✅ Commission Calculation
 
-**Source:** {source}
-**Revenue:** ${revenue:,.2f}
-**Spend:** ${spend:,.2f}
-**Spend %:** {spend_pct:.2f}%
+Source: {source}
+Revenue: ${revenue:,.2f}
+Spend: ${spend:,.2f}
+Spend %: {spend_pct:.2f}%
 
-**Commission Tier:** {tier['revenue_rate']}% revenue
-**Your Commission:** ${commission:,.2f}
-**Buyer Commission:** ${buyer_commission:,.2f}
-**Total Payout:** ${commission + buyer_commission:,.2f}
+Commission Tier: {tier['revenue_rate']}% revenue
+Your Commission: ${commission:,.2f}
+Buyer Commission: ${buyer_commission:,.2f}
+Total Payout: ${commission + buyer_commission:,.2f}
 """
+    return json.dumps({"text": message})
 
 def format_profit_result(source, profit, commission, tier):
-    return f"""✅ **Commission Calculation**
+    message = f"""✅ Commission Calculation
 
-**Source:** {source}
-**Profit:** ${profit:,.2f}
+Source: {source}
+Profit: ${profit:,.2f}
 
-**Commission Tier:** {tier['revenue_rate']}% of profit
-**Your Commission:** ${commission:,.2f}
+Commission Tier: {tier['revenue_rate']}% of profit
+Your Commission: ${commission:,.2f}
 """
+    return json.dumps({"text": message})
 
 def get_help_message():
-    return """📊 **Commission Calculator Help**
+    message = """📊 Commission Calculator Help
 
-**For Ginsu (Spend % based):**
-`Ginsu [revenue] [spend]`
-Example: `Ginsu 1000 200`
+For Ginsu (Spend % based):
+Ginsu [revenue] [spend]
+Example: Ginsu 1000 200
 
-**For Bing XML, Yahoo XML, RSOC (Profit based):**
-`[Source] [profit]`
-Example: `Bing XML 50`
+For Bing XML, Yahoo XML, RSOC (Profit based):
+[Source] [profit]
+Example: Bing XML 50
 
-**Available Sources:**
+Available Sources:
 - Ginsu
 - Bing XML
 - Yahoo XML
 - RSOC
 """
+    return json.dumps({"text": message})
+EOF
 
