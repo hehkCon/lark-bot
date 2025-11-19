@@ -57,9 +57,11 @@ class MessageApiClient(object):
     def _authorize_tenant_access_token(self):
         url = "{}{}".format(self._lark_host, TENANT_ACCESS_TOKEN_URI)
         req_body = {"app_id": self._app_id, "app_secret": self._app_secret}
-        response = requests.post(url, req_body)
+        headers = {"Content-Type": "application/json; charset=utf-8"}
+        response = requests.post(url, json=req_body, headers=headers)
         MessageApiClient._check_error_response(response)
         self._tenant_access_token = response.json().get("tenant_access_token")
+        print(f"DEBUG: Obtained tenant_access_token: {self._tenant_access_token}")
 
     @staticmethod
     def _check_error_response(resp):
