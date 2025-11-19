@@ -1,4 +1,5 @@
 import json
+import difflib
 
 COMMISSION_RATES = {
     "Ginsu": [
@@ -7,7 +8,6 @@ COMMISSION_RATES = {
         {"min_spend_ratio": 1.15, "company_rate": 0.06, "buyer_rate": 0.01},
         {"min_spend_ratio": 0.0,  "company_rate": 0.00, "buyer_rate": 0.0},  # below 1.15 no buyer commission
     ],
-    # Profit-based sources have same tiers and buyer commissions
     "Bing XML": [
         {"min_profit_pct": 10, "buyer_rate": 0.05},
         {"min_profit_pct": 0,  "buyer_rate": 0.01},
@@ -24,27 +24,12 @@ COMMISSION_RATES = {
 
 def calculate_commission(text):
     text = text.strip()
-    parts = text.split()
-
-    if len(parts) < 3:
+    if len(text) == 0:
         return get_help_message()
 
-    # Extract source and numeric values
-    source_input = parts[0]
-    values = []
-    try:
-        values = [float(p) for p in parts[1:] if is_number(p)]
-    except:
-        return json.dumps({"text": "❌ Invalid numeric input."})
-
-    source = None
-    for key in COMMISSION_RATES.keys():
-        if source_input.lower() == key.lower():
-            source = key
-            break
-
+    source, values = find_source_and_values(text)
     if not source:
-        return json.dumps({"text": f"❌ Invalid source '{source_input}'. Available sources: {', '.join(COMMISSION_RATES.keys())}"})
+        return json.dumps({"text": f"❌ Invalid source. Available sources: {', '.join(COMMISSION_RATES.keys())}"})
 
     if source == "Ginsu":
         if len(values) < 2:
@@ -66,8 +51,8 @@ def calculate_commission(text):
                 return json.dumps({"text": message})
         return json.dumps({"text": "❌ No matching commission tier found."})
 
-    # For profit-based sources
     else:
+        # Profit-based sources
         if len(values) < 2:
             return json.dumps({"text": f"❌ For {source}, please provide revenue and spend. Example: {source} 2000 1500"})
         revenue, spend = values[0], values[1]
@@ -86,6 +71,41 @@ def calculate_commission(text):
                     message = f"Buyer commission: ${buyer_commission:,.2f}"
                 return json.dumps({"text": message})
         return json.dumps({"text": "❌ No matching commission tier found."})
+
+def find_source_and_values(text):
+    text_lower = text.lower()
+    possible_keys = list(COMMISSION_RATES.keys())
+    words = text_lower.split()
+
+    # Try matching first 2 words as source
+    candidate = " ".join(words[:2])
+    matches = difflib.get_close_matches(candidate, [k.lower() for k in possible_keys], n=1, cutoff=0.8)
+    if matches:
+        matched_key = next(k for k in possible_keys if k.lower() == matches[0])
+        rest = text[len(matched_key):].strip()
+        parts_rest = rest.split()
+        values = []
+        try:
+            values = [float(p) for p in parts_rest if is_number(p)]
+        except:
+            return None, []
+        return matched_key, values
+
+    # If no match, try first word only
+    candidate = words[0]
+    matches = difflib.get_close_matches(candidate, [k.lower() for k in possible_keys], n=1, cutoff=0.8)
+    if matches:
+        matched_key = next(k for k in possible_keys if k.lower() == matches[0])
+        rest = text[len(matched_key):].strip()
+        parts_rest = rest.split()
+        values = []
+        try:
+            values = [float(p) for p in parts_rest if is_number(p)]
+        except:
+            return None, []
+        return matched_key, values
+
+    return None, []
 
 def is_number(s):
     try:
