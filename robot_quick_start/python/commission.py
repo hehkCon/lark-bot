@@ -1,157 +1,107 @@
-import re
 import json
 
-# Commission rate configuration
 COMMISSION_RATES = {
     "Ginsu": [
-        {"min_spend_pct": 25, "max_spend_pct": 100, "revenue_rate": 11, "buyer_commission": 5, "calc_type": "Spend %"},
-        {"min_spend_pct": 20, "max_spend_pct": 24.99, "revenue_rate": 9, "buyer_commission": 1, "calc_type": "Spend %"},
-        {"min_spend_pct": 15, "max_spend_pct": 19.99, "revenue_rate": 6, "buyer_commission": 1, "calc_type": "Spend %"},
-        {"min_spend_pct": 0, "max_spend_pct": 14.99, "revenue_rate": 2, "buyer_commission": 0, "calc_type": "Spend %"},
+        {"min_spend_ratio": 1.25, "company_rate": 0.11, "buyer_rate": 0.05},
+        {"min_spend_ratio": 1.20, "company_rate": 0.09, "buyer_rate": 0.01},
+        {"min_spend_ratio": 1.15, "company_rate": 0.06, "buyer_rate": 0.01},
+        {"min_spend_ratio": 0.0,  "company_rate": 0.00, "buyer_rate": 0.0},  # below 1.15 no buyer commission
     ],
+    # Profit-based sources have same tiers and buyer commissions
     "Bing XML": [
-        {"min_profit": 10, "max_profit": 100, "revenue_rate": 5, "calc_type": "Profit"},
-        {"min_profit": 0, "max_profit": 9.99, "revenue_rate": 1, "calc_type": "Profit"},
+        {"min_profit_pct": 10, "buyer_rate": 0.05},
+        {"min_profit_pct": 0,  "buyer_rate": 0.01},
     ],
     "Yahoo XML": [
-        {"min_profit": 10, "max_profit": 100, "revenue_rate": 5, "calc_type": "Profit"},
-        {"min_profit": 0, "max_profit": 9.99, "revenue_rate": 1, "calc_type": "Profit"},
+        {"min_profit_pct": 10, "buyer_rate": 0.05},
+        {"min_profit_pct": 0,  "buyer_rate": 0.01},
     ],
     "RSOC": [
-        {"min_profit": 10, "max_profit": 100, "revenue_rate": 5, "calc_type": "Profit"},
-        {"min_profit": 0, "max_profit": 9.99, "revenue_rate": 1, "calc_type": "Profit"},
+        {"min_profit_pct": 10, "buyer_rate": 0.05},
+        {"min_profit_pct": 0,  "buyer_rate": 0.01},
     ],
 }
 
 def calculate_commission(text):
-    """
-    Parse user message and calculate commission.
-    Expected format examples:
-    - "Ginsu 1000 200" (source, revenue, spend)
-    - "Bing XML 500" (source, profit)
-    - "calc Ginsu 1000 200"
-    """
-    
-    # Clean and parse input
     text = text.strip()
-    
-    # Try to extract source, revenue, and spend/profit
     parts = text.split()
-    
-    if len(parts) < 2:
+
+    if len(parts) < 3:
         return get_help_message()
-    
-    # Determine source (support multi-word sources like "Bing XML")
-    source = None
+
+    # Extract source and numeric values
+    source_input = parts[0]
     values = []
-    
+    try:
+        values = [float(p) for p in parts[1:] if is_number(p)]
+    except:
+        return json.dumps({"text": "❌ Invalid numeric input."})
+
+    source = None
     for key in COMMISSION_RATES.keys():
-        if text.lower().startswith(key.lower()):
+        if source_input.lower() == key.lower():
             source = key
-            remaining = text[len(key):].strip().split()
-            values = [float(v) for v in remaining if is_number(v)]
             break
-    
+
     if not source:
-        error_msg = f"❌ Invalid source. Available sources: {', '.join(COMMISSION_RATES.keys())}\n\n{get_help_message()}"
-        return json.dumps({"text": error_msg})
-    
-    # Calculate based on source type
-    rate_config = COMMISSION_RATES[source]
-    calc_type = rate_config[0]["calc_type"]
-    
-    if calc_type == "Spend %":
+        return json.dumps({"text": f"❌ Invalid source '{source_input}'. Available sources: {', '.join(COMMISSION_RATES.keys())}"})
+
+    if source == "Ginsu":
         if len(values) < 2:
-            error_msg = f"❌ For {source}, please provide: revenue and spend\nExample: {source} 1000 200"
-            return json.dumps({"text": error_msg})
-        
-        revenue = values[0]
-        spend = values[1]
-        spend_pct = (spend / revenue * 100) if revenue > 0 else 0
-        
-        # Find matching tier
-        matching_tier = None
-        for tier in rate_config:
-            if tier["min_spend_pct"] <= spend_pct <= tier["max_spend_pct"]:
-                matching_tier = tier
-                break
-        
-        if not matching_tier:
-            error_msg = f"❌ No matching commission tier for {spend_pct:.2f}% spend"
-            return json.dumps({"text": error_msg})
-        
-        commission = revenue * (matching_tier["revenue_rate"] / 100)
-        buyer_commission = revenue * (matching_tier["buyer_commission"] / 100)
-        
-        return format_result(source, revenue, spend, spend_pct, commission, buyer_commission, matching_tier)
-    
-    elif calc_type == "Profit":
-        if len(values) < 1:
-            error_msg = f"❌ For {source}, please provide: profit\nExample: {source} 50"
-            return json.dumps({"text": error_msg})
-        
-        profit = values[0]
-        
-        # Find matching tier
-        matching_tier = None
-        for tier in rate_config:
-            if tier["min_profit"] <= profit <= tier["max_profit"]:
-                matching_tier = tier
-                break
-        
-        if not matching_tier:
-            error_msg = f"❌ No matching commission tier for ${profit:.2f} profit"
-            return json.dumps({"text": error_msg})
-        
-        commission = profit * (matching_tier["revenue_rate"] / 100)
-        
-        return format_profit_result(source, profit, commission, matching_tier)
-    
-    return json.dumps({"text": "❌ Unknown calculation type"})
+            return json.dumps({"text": f"❌ For {source}, please provide revenue and spend. Example: {source} 3000 2000"})
+        revenue, spend = values[0], values[1]
+        if spend == 0:
+            return json.dumps({"text": "❌ Spend cannot be zero."})
+
+        spend_ratio = revenue / spend
+
+        for tier in COMMISSION_RATES[source]:
+            if spend_ratio >= tier["min_spend_ratio"]:
+                company_commission = spend * tier["company_rate"]
+                buyer_commission = company_commission * tier["buyer_rate"]
+                if buyer_commission == 0:
+                    message = f"Buyer commission is 0 for spend ratio {spend_ratio:.3f}."
+                else:
+                    message = f"Buyer commission: ${buyer_commission:,.2f}"
+                return json.dumps({"text": message})
+        return json.dumps({"text": "❌ No matching commission tier found."})
+
+    # For profit-based sources
+    else:
+        if len(values) < 2:
+            return json.dumps({"text": f"❌ For {source}, please provide revenue and spend. Example: {source} 2000 1500"})
+        revenue, spend = values[0], values[1]
+        profit = revenue - spend
+        if revenue == 0:
+            return json.dumps({"text": "❌ Revenue cannot be zero."})
+
+        profit_pct = (profit / revenue) * 100
+
+        for tier in COMMISSION_RATES[source]:
+            if profit_pct >= tier["min_profit_pct"]:
+                buyer_commission = profit * tier["buyer_rate"]
+                if buyer_commission <= 0:
+                    message = f"Buyer commission is 0 for profit percentage {profit_pct:.2f}%."
+                else:
+                    message = f"Buyer commission: ${buyer_commission:,.2f}"
+                return json.dumps({"text": message})
+        return json.dumps({"text": "❌ No matching commission tier found."})
 
 def is_number(s):
     try:
         float(s)
         return True
-    except ValueError:
+    except:
         return False
-
-def format_result(source, revenue, spend, spend_pct, commission, buyer_commission, tier):
-    message = f"""✅ Commission Calculation
-
-Source: {source}
-Revenue: ${revenue:,.2f}
-Spend: ${spend:,.2f}
-Spend %: {spend_pct:.2f}%
-
-Commission Tier: {tier['revenue_rate']}% revenue
-Your Commission: ${commission:,.2f}
-Buyer Commission: ${buyer_commission:,.2f}
-Total Payout: ${commission + buyer_commission:,.2f}
-"""
-    return json.dumps({"text": message})
-
-def format_profit_result(source, profit, commission, tier):
-    message = f"""✅ Commission Calculation
-
-Source: {source}
-Profit: ${profit:,.2f}
-
-Commission Tier: {tier['revenue_rate']}% of profit
-Your Commission: ${commission:,.2f}
-"""
-    return json.dumps({"text": message})
 
 def get_help_message():
     message = """📊 Commission Calculator Help
 
-For Ginsu (Spend % based):
-Ginsu [revenue] [spend]
-Example: Ginsu 1000 200
+For Ginsu (based on Spend Ratio = Revenue / Spend):
+Provide revenue and spend. Example: `Ginsu 3000 2000`
 
-For Bing XML, Yahoo XML, RSOC (Profit based):
-[Source] [profit]
-Example: Bing XML 50
+For Bing XML, Yahoo XML, RSOC (based on Profit % = (Revenue - Spend) / Revenue):
+Provide revenue and spend. Example: `RSOC 2000 1500`
 
 Available Sources:
 - Ginsu
@@ -160,3 +110,4 @@ Available Sources:
 - RSOC
 """
     return json.dumps({"text": message})
+
