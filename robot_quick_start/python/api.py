@@ -71,32 +71,35 @@ class MessageApiClient(object):
     def send_text_with_open_id(self, open_id, content):
         self.send("open_id", open_id, "text", content)
 
-    def send(self, receive_id_type, receive_id, msg_type, content):
-        token = self.tenant_access_token
-        print(f"DEBUG: Authorization header token: {token}")
+def send(self, receive_id_type, receive_id, msg_type, content):  
+    token = self.tenant_access_token
+    print(f"DEBUG: Authorization header token: {token}")
 
-        url = "{}{}?receive_id_type={}".format(
-            self._lark_host, MESSAGE_URI, receive_id_type
-        )
-        headers = {
-            "Content-Type": "application/json",
-            "Authorization": "Bearer " + token,
-        }
+    url = "{}{}?receive_id_type={}".format(
+        self._lark_host, MESSAGE_URI, receive_id_type
+    )
+    headers = {
+        "Content-Type": "application/json",
+        "Authorization": "Bearer " + token,
+    }
 
-        if msg_type == "text" and isinstance(content, str):
-            msg_content = json.dumps({"text": content})
-        else:
-            msg_content = json.dumps(content)
+    if msg_type == "text" and isinstance(content, str):
+        msg_content = json.dumps({"text": content})
+    else:
+        msg_content = json.dumps(content)
 
-        req_body = {
-            "receive_id": receive_id,
-            "content": msg_content,
-            "msg_type": msg_type,
-        }
+    req_body = {
+        "receive_id": receive_id,
+        "content": msg_content,
+        "msg_type": msg_type,
+    }
 
-        print(f"DEBUG: Sending message to {receive_id} with payload: {req_body}")
-        resp = requests.post(url=url, headers=headers, json=req_body)
-        MessageApiClient._check_error_response(resp)
+    print(f"DEBUG: Sending POST to {url}")
+    print(f"DEBUG: Headers: {headers}")
+    print(f"DEBUG: Payload: {json.dumps(req_body)}")
+
+    resp = requests.post(url=url, headers=headers, json=req_body)
+    MessageApiClient._check_error_response(resp)
 
     @staticmethod
     def _check_error_response(resp):
