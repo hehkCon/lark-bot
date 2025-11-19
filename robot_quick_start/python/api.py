@@ -7,7 +7,7 @@ import json
 APP_ID = os.getenv("APP_ID")
 APP_SECRET = os.getenv("APP_SECRET")
 
-# const
+# Constants
 TENANT_ACCESS_TOKEN_URI = "/open-apis/auth/v3/tenant_access_token/internal"
 MESSAGE_URI = "/open-apis/im/v1/messages"
 
@@ -28,6 +28,10 @@ class MessageApiClient(object):
 
     def send(self, receive_id_type, receive_id, msg_type, content):
         self._authorize_tenant_access_token()
+
+        # Debug: log the token
+        print(f"DEBUG: Using tenant_access_token: {self.tenant_access_token}")
+
         url = "{}{}?receive_id_type={}".format(
             self._lark_host, MESSAGE_URI, receive_id_type
         )
@@ -36,7 +40,7 @@ class MessageApiClient(object):
             "Authorization": "Bearer " + self.tenant_access_token,
         }
 
-        # Properly format the content as a JSON string for text messages
+        # Properly format content as JSON string for text type
         if msg_type == "text" and isinstance(content, str):
             msg_content = json.dumps({"text": content})
         else:
@@ -48,8 +52,9 @@ class MessageApiClient(object):
             "msg_type": msg_type,
         }
 
-        # Debug output to verify request payload
-        logging.debug(f"POST {url} payload: {req_body}")
+        # Debug: log request details
+        print(f"DEBUG: Sending POST request to {url} with payload: {req_body}")
+        print(f"DEBUG: Headers: {headers}")
 
         resp = requests.post(url=url, headers=headers, json=req_body)
         MessageApiClient._check_error_response(resp)
@@ -58,8 +63,10 @@ class MessageApiClient(object):
         url = "{}{}".format(self._lark_host, TENANT_ACCESS_TOKEN_URI)
         req_body = {"app_id": self._app_id, "app_secret": self._app_secret}
         headers = {"Content-Type": "application/json; charset=utf-8"}
+
         response = requests.post(url, json=req_body, headers=headers)
         MessageApiClient._check_error_response(response)
+
         self._tenant_access_token = response.json().get("tenant_access_token")
         print(f"DEBUG: Obtained tenant_access_token: {self._tenant_access_token}")
 
