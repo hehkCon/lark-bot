@@ -2,11 +2,13 @@
 
 import os
 import logging
+import json
 import requests
 from api import MessageApiClient
 from event import MessageReceiveEvent, UrlVerificationEvent, EventManager
 from flask import Flask, jsonify
 from dotenv import load_dotenv, find_dotenv
+from commission import calculate_commission
 
 # load env parameters form file named .env
 load_dotenv(find_dotenv())
@@ -40,11 +42,22 @@ def message_receive_event_handler(req_data: MessageReceiveEvent):
     if message.message_type != "text":
         logging.warn("Other types of messages have not been processed yet")
         return jsonify()
-        # get open_id and text_content
+    
+    # get open_id and text_content
     open_id = sender_id.open_id
-    text_content = message.content
-    # echo text message
-    message_api_client.send_text_with_open_id(open_id, text_content)
+    
+    # Parse the content (it comes as JSON string)
+    try:
+        content_obj = json.loads(message.content)
+        text_content = content_obj.get("text", "")
+    except:
+        text_content = message.content
+    
+    # Calculate commission based on user input
+    response = calculate_commission(text_content)
+    
+    # Send response back to user
+    message_api_client.send_text_with_open_id(open_id, response)
     return jsonify()
 
 
@@ -69,3 +82,4 @@ def callback_event_handler():
 if __name__ == "__main__":
     # init()
     app.run(host="0.0.0.0", port=3000, debug=True)
+
