@@ -1,15 +1,57 @@
 #! /usr/bin/env python3.8
 import os
-import logging
+import threading
+import time
 import requests
 import json
 
 APP_ID = os.getenv("APP_ID")
 APP_SECRET = os.getenv("APP_SECRET")
+LARK_HOST = os.getenv("LARK_HOST")
 
-# Constants
 TENANT_ACCESS_TOKEN_URI = "/open-apis/auth/v3/tenant_access_token/internal"
 MESSAGE_URI = "/open-apis/im/v1/messages"
+
+
+class TokenManager:
+    def __init__(self, app_id, app_secret, host):
+        self.app_id = app_id
+        self.app_secret = app_secret
+        self.host = host
+        self.token = None
+        self.expiry_time = 0
+        self.lock = threading.Lock()
+
+    def fetch_token(self):
+        url = f"{self.host}{TENANT_ACCESS_TOKEN_URI}"
+        headers = {"Content-Type": "application/json; charset=utf-8"}
+        payload = {"app_id": self.app_id, "app_secret": self.app_secret}
+
+        response = requests.post(url, json=payload, headers=headers)
+        response.raise_for_status()
+        data = response.json()
+        with self.lock:
+            self.token = data.get("tenant_access_token")
+            self.expiry_time = time.time() + data.get("expire", 7200) - 120  # refresh 2 mins early
+        print(f"DEBUG: Token fetched, expires at {self.expiry_time}")
+
+    def get_token(self):
+        with self.lock:
+            if not self.token or time.time() > self.expiry_time:
+                self.fetch_token()
+            return self.token
+
+    def start_auto_refresh(self):
+        def refresh_loop():
+            while True:
+                try:
+                    self.fetch_token()
+                except Exception as e:
+                    print(f"ERROR refreshing token: {e}")
+                sleep_time = max(60, self.expiry_time - time.time() - 60)
+                time.sleep(sleep_time)
+        thread = threading.Thread(target=refresh_loop, daemon=True)
+        thread.start()
 
 
 class MessageApiClient(object):
@@ -17,21 +59,17 @@ class MessageApiClient(object):
         self._app_id = app_id
         self._app_secret = app_secret
         self._lark_host = lark_host
-        self._tenant_access_token = ""
+        self.token_manager = TokenManager(app_id, app_secret, lark_host)
+        self.token_manager.start_auto_refresh()
 
     @property
     def tenant_access_token(self):
-        return self._tenant_access_token
+        return self.token_manager.get_token()
 
     def send_text_with_open_id(self, open_id, content):
         self.send("open_id", open_id, "text", content)
 
     def send(self, receive_id_type, receive_id, msg_type, content):
-        self._authorize_tenant_access_token()
-
-        # Debug: log the token
-        print(f"DEBUG: Using tenant_access_token: {self.tenant_access_token}")
-
         url = "{}{}?receive_id_type={}".format(
             self._lark_host, MESSAGE_URI, receive_id_type
         )
@@ -40,7 +78,6 @@ class MessageApiClient(object):
             "Authorization": "Bearer " + self.tenant_access_token,
         }
 
-        # Properly format content as JSON string for text type
         if msg_type == "text" and isinstance(content, str):
             msg_content = json.dumps({"text": content})
         else:
@@ -52,23 +89,9 @@ class MessageApiClient(object):
             "msg_type": msg_type,
         }
 
-        # Debug: log request details
-        print(f"DEBUG: Sending POST request to {url} with payload: {req_body}")
-        print(f"DEBUG: Headers: {headers}")
-
+        print(f"DEBUG: Sending message to {receive_id} with token {self.tenant_access_token}")
         resp = requests.post(url=url, headers=headers, json=req_body)
         MessageApiClient._check_error_response(resp)
-
-    def _authorize_tenant_access_token(self):
-        url = "{}{}".format(self._lark_host, TENANT_ACCESS_TOKEN_URI)
-        req_body = {"app_id": self._app_id, "app_secret": self._app_secret}
-        headers = {"Content-Type": "application/json; charset=utf-8"}
-
-        response = requests.post(url, json=req_body, headers=headers)
-        MessageApiClient._check_error_response(response)
-
-        self._tenant_access_token = response.json().get("tenant_access_token")
-        print(f"DEBUG: Obtained tenant_access_token: {self._tenant_access_token}")
 
     @staticmethod
     def _check_error_response(resp):
@@ -77,7 +100,6 @@ class MessageApiClient(object):
         response_dict = resp.json()
         code = response_dict.get("code", -1)
         if code != 0:
-            logging.error(response_dict)
             raise LarkException(code=code, msg=response_dict.get("msg"))
 
 
@@ -90,4 +112,7 @@ class LarkException(Exception):
         return "{}:{}".format(self.code, self.msg)
 
     __repr__ = __str__
+
+# Example usage initialization for your app (adjust as needed):
+# message_api_client = MessageApiClient(APP_ID, APP_SECRET, LARK_HOST)
 
