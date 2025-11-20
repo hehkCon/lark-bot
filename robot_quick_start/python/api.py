@@ -41,5 +41,6 @@ class MessageApiClient:
         response.raise_for_status()
         return response.json()
 
-    # Add other methods (e.g., token fetch/refresh) as needed
+    def send_text_with_open_id(self, open_id, message):
+        return self.send(receive_id_type="open_id", receive_id=open_id, msg_type="text", content=message)
 
