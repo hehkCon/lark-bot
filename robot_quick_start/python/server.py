@@ -4,10 +4,15 @@ import os
 import logging
 import json
 from flask import Flask, jsonify, request
-from dotenv import load_dotenv, find_dotenv
+from dotenv import load_dotenv
 
-# Load environment variables from .env file or Render Secret Files
-load_dotenv(find_dotenv())  # Adjust path if using secrets differently
+# Load environment variables explicitly from Render secret file path
+load_dotenv(dotenv_path="/etc/secrets/.env")  # Adjust this path if needed
+
+# Debug prints to verify environment variables loaded correctly
+print(f"DEBUG: APP_ID={os.getenv('APP_ID')}")
+print(f"DEBUG: APP_SECRET={'SET' if os.getenv('APP_SECRET') else 'NOT SET'}")
+print(f"DEBUG: LARK_HOST={os.getenv('LARK_HOST')}")
 
 from api import MessageApiClient
 from event import MessageReceiveEvent, UrlVerificationEvent, EventManager
@@ -15,7 +20,7 @@ from commission import calculate_commission  # your commission logic
 
 app = Flask(__name__)
 
-# Fetch credentials from env only once
+# Fetch credentials from environment variables
 APP_ID = os.getenv("APP_ID")
 APP_SECRET = os.getenv("APP_SECRET")
 VERIFICATION_TOKEN = os.getenv("VERIFICATION_TOKEN")
@@ -66,19 +71,16 @@ def handle_message_receive(req_data: MessageReceiveEvent):
 
     return jsonify()
 
-
 @app.errorhandler(Exception)
 def handle_exceptions(ex):
     logging.error(f"Unexpected error: {ex}")
     status_code = ex.response.status_code if hasattr(ex, "response") and ex.response else 500
     return jsonify(message=str(ex)), status_code
 
-
 @app.route("/", methods=["POST"])
 def handle_callback():
     event_handler, event = event_manager.get_handler_with_event(VERIFICATION_TOKEN, ENCRYPT_KEY or "")
     return event_handler(event)
-
 
 if __name__ == "__main__":
     port = int(os.getenv("PORT", 3000))
