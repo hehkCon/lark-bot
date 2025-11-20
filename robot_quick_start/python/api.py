@@ -84,10 +84,13 @@ class MessageApiClient:
             # For other message types, assume content is already a dict
             msg_content = content
 
+        # CRITICAL FIX: Serialize content to JSON string
+        content_str = json.dumps(msg_content)
+
         payload = {
             "receive_id": receive_id,
             "msg_type": msg_type,
-            "content": msg_content,
+            "content": content_str,  # JSON string, not dict
         }
 
         print("DEBUG: Sending message payload:", json.dumps(payload))
@@ -99,4 +102,3 @@ class MessageApiClient:
 
     def send_text_with_open_id(self, open_id, message):
         return self.send("open_id", open_id, "text", message)
-
