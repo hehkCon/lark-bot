@@ -1,4 +1,3 @@
-import json
 import difflib
 
 COMMISSION_RATES = {
@@ -32,14 +31,14 @@ def calculate_commission(text):
 
     source, values = find_source_and_values(text)
     if not source:
-        return json.dumps({"text": f"❌ Invalid source. Available sources: {', '.join(COMMISSION_RATES.keys())}"})
+        return f"❌ Invalid source. Available sources: {', '.join(COMMISSION_RATES.keys())}"
 
     if source == "Ginsu":
         if len(values) < 2:
-            return json.dumps({"text": f"❌ For {source}, please provide revenue and spend. Example: {source} 3000 2000"})
+            return f"❌ For {source}, please provide revenue and spend. Example: {source} 3000 2000"
         revenue, spend = values[0], values[1]
         if spend == 0:
-            return json.dumps({"text": "❌ Spend cannot be zero."})
+            return "❌ Spend cannot be zero."
 
         spend_ratio = revenue / spend
 
@@ -51,17 +50,17 @@ def calculate_commission(text):
                     message = f"Buyer commission is 0 for spend ratio {spend_ratio:.3f}."
                 else:
                     message = f"Buyer commission: ${buyer_commission:,.2f}"
-                return json.dumps({"text": message})
-        return json.dumps({"text": "❌ No matching commission tier found."})
+                return message
+        return "❌ No matching commission tier found."
 
     else:
         # Profit-based sources
         if len(values) < 2:
-            return json.dumps({"text": f"❌ For {source}, please provide revenue and spend. Example: {source} 2000 1500"})
+            return f"❌ For {source}, please provide revenue and spend. Example: {source} 2000 1500"
         revenue, spend = values[0], values[1]
         profit = revenue - spend
         if revenue == 0:
-            return json.dumps({"text": "❌ Revenue cannot be zero."})
+            return "❌ Revenue cannot be zero."
 
         profit_pct = (profit / revenue) * 100
 
@@ -72,8 +71,8 @@ def calculate_commission(text):
                     message = f"Buyer commission is 0 for profit percentage {profit_pct:.2f}%."
                 else:
                     message = f"Buyer commission: ${buyer_commission:,.2f}"
-                return json.dumps({"text": message})
-        return json.dumps({"text": "❌ No matching commission tier found."})
+                return message
+        return "❌ No matching commission tier found."
 
 def find_source_and_values(text):
     text_lower = text.lower()
@@ -132,5 +131,5 @@ Available Sources:
 - Yahoo XML
 - RSOC
 """
-    return json.dumps({"text": message})
+    return message
 
