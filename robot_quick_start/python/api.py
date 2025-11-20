@@ -73,6 +73,8 @@ class MessageApiClient(object):
 
     def send(self, receive_id_type, receive_id, msg_type, content):
         token = self.tenant_access_token
+        if not token:
+            raise Exception("Tenant access token is missing")
         print(f"DEBUG: Authorization header token: {token}")
 
         url = "{}{}?receive_id_type={}".format(
@@ -120,8 +122,4 @@ class LarkException(Exception):
         return "{}:{}".format(self.code, self.msg)
 
     __repr__ = __str__
-
-
-# Example: initialize your client like this in your app:
-# message_api_client = MessageApiClient(APP_ID, APP_SECRET, LARK_HOST)
 
