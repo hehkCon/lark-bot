@@ -18,7 +18,7 @@ class MessageApiClient:
             "Content-Type": "application/json",
         }
 
-        # If content is a JSON string, parse it to dict to avoid double encoding
+        # If content is a JSON string (from commission.py), parse to dict to avoid double encoding
         if msg_type == "text" and isinstance(content, str):
             try:
                 content_obj = json.loads(content)
@@ -36,6 +36,9 @@ class MessageApiClient:
             "msg_type": msg_type,
             "content": msg_content,
         }
+
+        print("DEBUG: Sending message payload:", json.dumps(payload))  # Debug log for payload
+        print("DEBUG: Auth header:", headers.get("Authorization"))     # Debug log for auth token
 
         response = requests.post(url, headers=headers, json=payload)
         response.raise_for_status()
