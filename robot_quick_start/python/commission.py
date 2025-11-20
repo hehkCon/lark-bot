@@ -58,9 +58,9 @@ def calculate_commission(text):
                 company_commission = spend * tier["company_rate"]
                 buyer_commission = company_commission * tier["buyer_rate"]
                 if buyer_commission == 0:
-                    message = f"Buyer commission is 0 for spend ratio {spend_ratio:.3f}."
+                    message = f"{source}: Buyer commission is $0"
                 else:
-                    message = f"Buyer commission: ${buyer_commission:,.2f}"
+                    message = f"{source}: Buyer commission: ${buyer_commission:,.2f}"
                 print(f"DEBUG: calculate_commission returns: {message!r}")
                 return message
         message = "❌ No matching commission tier found."
@@ -87,9 +87,9 @@ def calculate_commission(text):
             if profit_pct >= tier["min_profit_pct"]:
                 buyer_commission = profit * tier["buyer_rate"]
                 if buyer_commission <= 0:
-                    message = f"Buyer commission is 0 for profit percentage {profit_pct:.2f}%."
+                    message = f"{source}: Buyer commission is $0"
                 else:
-                    message = f"Buyer commission: ${buyer_commission:,.2f}"
+                    message = f"{source}: Buyer commission: ${buyer_commission:,.2f}"
                 print(f"DEBUG: calculate_commission returns: {message!r}")
                 return message
         message = "❌ No matching commission tier found."
