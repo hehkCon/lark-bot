@@ -12,12 +12,14 @@ load_dotenv(dotenv_path="/etc/secrets/.env")
 print(f"DEBUG: APP_ID={os.getenv('APP_ID')}")
 print(f"DEBUG: LARK_HOST={os.getenv('LARK_HOST')}")
 
-from api import MessageApiClient, APP_ID, APP_SECRET, LARK_HOST
+from api import MessageApiClient  # Only import MessageApiClient
+
 from event import MessageReceiveEvent, UrlVerificationEvent, EventManager
 from commission import calculate_commission  # Your commission calculator logic here
 
 app = Flask(__name__)
 
+# Load env vars here in server.py only
 APP_ID = os.getenv("APP_ID")
 APP_SECRET = os.getenv("APP_SECRET")
 VERIFICATION_TOKEN = os.getenv("VERIFICATION_TOKEN")
