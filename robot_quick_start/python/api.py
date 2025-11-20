@@ -28,7 +28,8 @@ class TokenManager:
             expire_in = data.get("expire", 7200)
             self.expiry_time = time.time() + expire_in - 120  # Refresh 2 mins early
 
-            print(f"DEBUG: Fetched token, expires in {expire_in}s at {self.expiry_time}")
+            token_preview = self.token[:10] + "..." + self.token[-10:] if self.token else "None"
+            print(f"DEBUG: Fetched token ({token_preview}), expires in {expire_in}s at {self.expiry_time}")
 
     def get_token(self):
         with self.lock:
@@ -57,7 +58,8 @@ class MessageApiClient:
 
     def send(self, receive_id_type, receive_id, msg_type, content):
         token = self.token_manager.get_token()
-        print(f"DEBUG: Using token: {token}")
+        token_preview = token[:10] + "..." + token[-10:] if token else "None"
+        print(f"DEBUG: Using token: {token_preview}")
 
         url = f"{self.host}/open-apis/im/v1/messages?receive_id_type={receive_id_type}"
         headers = {
@@ -94,7 +96,7 @@ class MessageApiClient:
         }
 
         print("DEBUG: Sending message payload:", json.dumps(payload))
-        print("DEBUG: Authorization header:", headers["Authorization"])
+        print(f"DEBUG: Authorization header: Bearer {token_preview}")
 
         response = requests.post(url, headers=headers, json=payload)
         response.raise_for_status()
@@ -102,3 +104,4 @@ class MessageApiClient:
 
     def send_text_with_open_id(self, open_id, message):
         return self.send("open_id", open_id, "text", message)
+
