@@ -24,21 +24,32 @@ COMMISSION_RATES = {
 def calculate_commission(text):
     text = text.strip()
     if text.lower() == "help":
-        return get_help_message()
+        message = get_help_message()
+        print(f"DEBUG: calculate_commission returns: {message!r}")
+        return message
 
     if len(text) == 0:
-        return get_help_message()
+        message = get_help_message()
+        print(f"DEBUG: calculate_commission returns: {message!r}")
+        return message
 
     source, values = find_source_and_values(text)
     if not source:
-        return f"❌ Invalid source. Available sources: {', '.join(COMMISSION_RATES.keys())}"
+        message = f"❌ Invalid source. Available sources: {', '.join(COMMISSION_RATES.keys())}"
+        print(f"DEBUG: calculate_commission returns: {message!r}")
+        return message
 
     if source == "Ginsu":
         if len(values) < 2:
-            return f"❌ For {source}, please provide revenue and spend. Example: {source} 3000 2000"
+            message = f"❌ For {source}, please provide revenue and spend. Example: {source} 3000 2000"
+            print(f"DEBUG: calculate_commission returns: {message!r}")
+            return message
+
         revenue, spend = values[0], values[1]
         if spend == 0:
-            return "❌ Spend cannot be zero."
+            message = "❌ Spend cannot be zero."
+            print(f"DEBUG: calculate_commission returns: {message!r}")
+            return message
 
         spend_ratio = revenue / spend
 
@@ -50,17 +61,25 @@ def calculate_commission(text):
                     message = f"Buyer commission is 0 for spend ratio {spend_ratio:.3f}."
                 else:
                     message = f"Buyer commission: ${buyer_commission:,.2f}"
+                print(f"DEBUG: calculate_commission returns: {message!r}")
                 return message
-        return "❌ No matching commission tier found."
+        message = "❌ No matching commission tier found."
+        print(f"DEBUG: calculate_commission returns: {message!r}")
+        return message
 
     else:
         # Profit-based sources
         if len(values) < 2:
-            return f"❌ For {source}, please provide revenue and spend. Example: {source} 2000 1500"
+            message = f"❌ For {source}, please provide revenue and spend. Example: {source} 2000 1500"
+            print(f"DEBUG: calculate_commission returns: {message!r}")
+            return message
+
         revenue, spend = values[0], values[1]
         profit = revenue - spend
         if revenue == 0:
-            return "❌ Revenue cannot be zero."
+            message = "❌ Revenue cannot be zero."
+            print(f"DEBUG: calculate_commission returns: {message!r}")
+            return message
 
         profit_pct = (profit / revenue) * 100
 
@@ -71,8 +90,11 @@ def calculate_commission(text):
                     message = f"Buyer commission is 0 for profit percentage {profit_pct:.2f}%."
                 else:
                     message = f"Buyer commission: ${buyer_commission:,.2f}"
+                print(f"DEBUG: calculate_commission returns: {message!r}")
                 return message
-        return "❌ No matching commission tier found."
+        message = "❌ No matching commission tier found."
+        print(f"DEBUG: calculate_commission returns: {message!r}")
+        return message
 
 def find_source_and_values(text):
     text_lower = text.lower()
