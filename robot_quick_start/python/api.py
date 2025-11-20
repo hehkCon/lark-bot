@@ -1,45 +1,67 @@
 import requests
 import json
+import threading
 import time
 
-class MessageApiClient:
+class TokenManager:
     def __init__(self, app_id, app_secret, host):
         self.app_id = app_id
         self.app_secret = app_secret
         self.host = host
-        self.tenant_access_token = None
-        self.token_expiry = 0  # Unix timestamp when token expires
+        self.token = None
+        self.expiry_time = 0
+        self.lock = threading.Lock()
+        # Start background refresh thread
+        self.start_auto_refresh()
 
-    def fetch_tenant_access_token(self):
-        token_url = f"{self.host}/open-apis/auth/v3/tenant_access_token/internal"
+    def fetch_token(self):
+        url = f"{self.host}/open-apis/auth/v3/tenant_access_token/internal"
         headers = {"Content-Type": "application/json"}
-        data = {
-            "app_id": self.app_id,
-            "app_secret": self.app_secret,
-        }
-        response = requests.post(token_url, headers=headers, json=data)
+        payload = {"app_id": self.app_id, "app_secret": self.app_secret}
+        response = requests.post(url, headers=headers, json=payload)
         response.raise_for_status()
-        resp_json = response.json()
-        self.tenant_access_token = resp_json.get("tenant_access_token")
-        expire_seconds = resp_json.get("expire", 7200)  # usually 2 hours
-        self.token_expiry = time.time() + expire_seconds - 60  # refresh 1 min early
-        print(f"DEBUG: Fetched new tenant_access_token, expires in {expire_seconds} seconds")
+        data = response.json()
+        with self.lock:
+            self.token = data.get("tenant_access_token")
+            # Set expiry a bit early to refresh proactively
+            expire_in = data.get("expire", 7200)
+            self.expiry_time = time.time() + expire_in - 120
+            print(f"DEBUG: Fetched token, expires in {expire_in}s at {self.expiry_time}")
 
-    def ensure_access_token(self):
-        if not self.tenant_access_token or time.time() > self.token_expiry:
-            self.fetch_tenant_access_token()
+    def get_token(self):
+        with self.lock:
+            if not self.token or time.time() > self.expiry_time:
+                self.fetch_token()
+            return self.token
+
+    def start_auto_refresh(self):
+        def refresh_loop():
+            while True:
+                try:
+                    self.fetch_token()
+                except Exception as e:
+                    print(f"ERROR: Token refresh failed: {e}")
+                # Sleep until near token expiration
+                sleep_time = max(60, self.expiry_time - time.time())
+                time.sleep(sleep_time)
+        thread = threading.Thread(target=refresh_loop, daemon=True)
+        thread.start()
+
+
+class MessageApiClient:
+    def __init__(self, app_id, app_secret, host):
+        self.token_manager = TokenManager(app_id, app_secret, host)
+        self.host = host
 
     def send(self, receive_id_type, receive_id, msg_type, content):
-        self.ensure_access_token()
-        token = self.tenant_access_token
+        token = self.token_manager.get_token()
         url = f"{self.host}/open-apis/im/v1/messages?receive_id_type={receive_id_type}"
-
         headers = {
-            "Authorization": f"Bearer {token}",
             "Content-Type": "application/json",
+            "Authorization": "Bearer " + token,
         }
 
-        # Parse JSON string content to dict to avoid double encode
+        # Prepare content: parse JSON string if needed
         if msg_type == "text" and isinstance(content, str):
             try:
                 content_obj = json.loads(content)
@@ -50,7 +72,7 @@ class MessageApiClient:
             except json.JSONDecodeError:
                 msg_content = {"text": content}
         else:
-            msg_content = content  # assume dict for other msg types
+            msg_content = content
 
         payload = {
             "receive_id": receive_id,
@@ -58,13 +80,11 @@ class MessageApiClient:
             "content": msg_content,
         }
 
-        print("DEBUG: Sending message payload:", json.dumps(payload))
-        print("DEBUG: Authorization header:", headers["Authorization"])
-
+        print(f"DEBUG: Sending to {url} with token {token}")
         response = requests.post(url, headers=headers, json=payload)
         response.raise_for_status()
         return response.json()
 
     def send_text_with_open_id(self, open_id, message):
-        return self.send(receive_id_type="open_id", receive_id=open_id, msg_type="text", content=message)
+        return self.send("open_id", open_id, "text", message)
 
