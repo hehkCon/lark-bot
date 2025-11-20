@@ -85,10 +85,11 @@ class MessageApiClient(object):
             "Authorization": "Bearer " + token,
         }
 
+        # Fix: content should be a dict with "text" key for text messages
         if msg_type == "text" and isinstance(content, str):
-            msg_content = json.dumps({"text": content})
+            msg_content = {"text": content}
         else:
-            msg_content = json.dumps(content)
+            msg_content = content  # Assume dict for other message types
 
         req_body = {
             "receive_id": receive_id,
