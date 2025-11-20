@@ -1,4 +1,5 @@
 import difflib
+import re
 
 COMMISSION_RATES = {
     "Ginsu": [
@@ -19,6 +20,12 @@ COMMISSION_RATES = {
         {"min_profit_pct": 10, "buyer_rate": 0.05},
         {"min_profit_pct": 0,  "buyer_rate": 0.01},
     ],
+}
+
+# Alias mapping for short names
+SOURCE_ALIASES = {
+    "bing": "Bing XML",
+    "yahoo": "Yahoo XML",
 }
 
 def calculate_commission(text):
@@ -107,31 +114,51 @@ def find_source_and_values(text):
     if matches:
         matched_key = next(k for k in possible_keys if k.lower() == matches[0])
         rest = text[len(matched_key):].strip()
-        parts_rest = rest.split()
-        values = []
-        try:
-            values = [float(p) for p in parts_rest if is_number(p)]
-        except:
-            return None, []
+        values = parse_numbers(rest)
         return matched_key, values
 
-    # If no match, try first word only
+    # Try first word only with fuzzy matching
     candidate = words[0]
     matches = difflib.get_close_matches(candidate, [k.lower() for k in possible_keys], n=1, cutoff=0.8)
     if matches:
         matched_key = next(k for k in possible_keys if k.lower() == matches[0])
         rest = text[len(matched_key):].strip()
-        parts_rest = rest.split()
-        values = []
-        try:
-            values = [float(p) for p in parts_rest if is_number(p)]
-        except:
-            return None, []
+        values = parse_numbers(rest)
+        return matched_key, values
+
+    # Check aliases (bing → Bing XML, yahoo → Yahoo XML)
+    if candidate in SOURCE_ALIASES:
+        matched_key = SOURCE_ALIASES[candidate]
+        rest = text[len(candidate):].strip()
+        values = parse_numbers(rest)
         return matched_key, values
 
     return None, []
 
+def parse_numbers(text):
+    """
+    Extract numbers from text supporting:
+    - Decimals: 3000.32
+    - Dollar signs: $3000, $1,200.50
+    - Commas: 3,000 or 1,234.56
+    """
+    # Pattern to match currency values: $1,234.56 or 1234.56 or 1,234
+    pattern = r'\$?\s*(\d{1,3}(?:,\d{3})*(?:\.\d{1,2})?|\d+(?:\.\d{1,2})?)'
+    matches = re.findall(pattern, text)
+    
+    values = []
+    for match in matches:
+        # Remove commas and convert to float
+        cleaned = match.replace(',', '')
+        try:
+            values.append(float(cleaned))
+        except ValueError:
+            continue
+    
+    return values
+
 def is_number(s):
+    """Legacy helper - kept for compatibility but parse_numbers is now primary"""
     try:
         float(s)
         return True
@@ -149,9 +176,14 @@ Provide revenue and spend. Example: `RSOC 2000 1500`
 
 Available Sources:
 - Ginsu
-- Bing XML
-- Yahoo XML
+- Bing XML (or just "Bing")
+- Yahoo XML (or just "Yahoo")
 - RSOC
+
+You can use decimals, dollar signs, and commas:
+- `Ginsu 3000.50 2000.25`
+- `Bing $3,000 $2,500`
+- `Yahoo 1,500.75 1,200.50`
 """
     return message
 
