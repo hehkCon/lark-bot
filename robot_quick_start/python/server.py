@@ -63,6 +63,7 @@ def message_receive_event_handler(req_data: MessageReceiveEvent):
 
     return jsonify()
 
+
 @app.errorhandler(Exception)
 def msg_error_handler(ex):
     logging.error(f"Unhandled Exception: {ex}")
@@ -72,7 +73,18 @@ def msg_error_handler(ex):
     )
     return response
 
+
 @app.route("/", methods=["POST"])
 def callback_event_handler():
-    event_handler, event = event_manager.get_handler_with_event(VERIFICATION_TOKEN
+    if ENCRYPT_KEY:
+        event_handler, event = event_manager.get_handler_with_event(VERIFICATION_TOKEN, ENCRYPT_KEY)
+    else:
+        event_handler, event = event_manager.get_handler_with_event(VERIFICATION_TOKEN)
+
+    return event_handler(event)
+
+
+if __name__ == "__main__":
+    port = int(os.getenv("PORT", 3000))
+    app.run(host="0.0.0.0", port=port, debug=True)
 
