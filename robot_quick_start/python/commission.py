@@ -1,12 +1,11 @@
 import difflib
-import re
 
 COMMISSION_RATES = {
     "Ginsu": [
         {"min_spend_ratio": 1.25, "company_rate": 0.11, "buyer_rate": 0.05},
         {"min_spend_ratio": 1.20, "company_rate": 0.09, "buyer_rate": 0.01},
         {"min_spend_ratio": 1.15, "company_rate": 0.06, "buyer_rate": 0.01},
-        {"min_spend_ratio": 0.0,  "company_rate": 0.00, "buyer_rate": 0.0},  # below 1.15 no buyer commission
+        {"min_spend_ratio": 0.0,  "company_rate": 0.00, "buyer_rate": 0.0},
     ],
     "Bing XML": [
         {"min_profit_pct": 10, "buyer_rate": 0.05},
@@ -22,13 +21,14 @@ COMMISSION_RATES = {
     ],
 }
 
-# Alias mapping for short names
-SOURCE_ALIASES = {
-    "bing": "Bing XML",
-    "yahoo": "Yahoo XML",
-}
-
-def calculate_commission(text):
+def calculate_commission(text, user_id=None):
+    """
+    Calculate commission based on sell source and values.
+    
+    Args:
+        text: Input text with source and revenue/spend values
+        user_id: Lark user ID (open_id, union_id, or user_id) for @mention
+    """
     text = text.strip()
     if text.lower() == "help":
         message = get_help_message()
@@ -45,6 +45,9 @@ def calculate_commission(text):
         message = f"❌ Invalid source. Available sources: {', '.join(COMMISSION_RATES.keys())}"
         print(f"DEBUG: calculate_commission returns: {message!r}")
         return message
+
+    # Format user mention
+    user_mention = f'<at user_id="{user_id}"></at>' if user_id else "User"
 
     if source == "Ginsu":
         if len(values) < 2:
@@ -64,18 +67,32 @@ def calculate_commission(text):
             if spend_ratio >= tier["min_spend_ratio"]:
                 company_commission = spend * tier["company_rate"]
                 buyer_commission = company_commission * tier["buyer_rate"]
-                if buyer_commission == 0:
-                    message = f"{source}: Buyer commission is $0"
-                else:
-                    message = f"{source}: Buyer commission: ${buyer_commission:,.2f}"
+                
+                # Calculate profit for display
+                profit = revenue - spend
+                profit_pct = (profit / spend) * 100 if spend > 0 else 0
+                commission_rate_pct = tier["buyer_rate"] * 100
+                
+                message = f"""Hey {user_mention}! Here's your {source} commission:
+Platform: {source}
+Revenue: ${revenue:,.2f}
+Spend: ${spend:,.2f}
+Spend Ratio: {spend_ratio:.2f}
+Derived Profit: ${profit:,.2f} ({profit_pct:.2f}% of spend)
+Commission Rate: {commission_rate_pct:.2f}% of company commission
+Estimated Commission: ${buyer_commission:,.2f}
+
+Note: This is an estimate and is subject to change depending on the partner's final adjustment."""
+                
                 print(f"DEBUG: calculate_commission returns: {message!r}")
                 return message
+                
         message = "❌ No matching commission tier found."
         print(f"DEBUG: calculate_commission returns: {message!r}")
         return message
 
     else:
-        # Profit-based sources
+        # Profit-based sources (Bing XML, Yahoo XML, RSOC)
         if len(values) < 2:
             message = f"❌ For {source}, please provide revenue and spend. Example: {source} 2000 1500"
             print(f"DEBUG: calculate_commission returns: {message!r}")
@@ -83,22 +100,34 @@ def calculate_commission(text):
 
         revenue, spend = values[0], values[1]
         profit = revenue - spend
+        
         if revenue == 0:
             message = "❌ Revenue cannot be zero."
             print(f"DEBUG: calculate_commission returns: {message!r}")
             return message
 
         profit_pct = (profit / revenue) * 100
+        roi_pct = ((revenue - spend) / spend) * 100 if spend > 0 else 0
 
         for tier in COMMISSION_RATES[source]:
             if profit_pct >= tier["min_profit_pct"]:
                 buyer_commission = profit * tier["buyer_rate"]
-                if buyer_commission <= 0:
-                    message = f"{source}: Buyer commission is $0"
-                else:
-                    message = f"{source}: Buyer commission: ${buyer_commission:,.2f}"
+                commission_rate_pct = tier["buyer_rate"] * 100
+                
+                message = f"""Hey {user_mention}! Here's your {source} commission:
+Platform: {source}
+Revenue: ${revenue:,.2f}
+Spend: ${spend:,.2f}
+ROI: {roi_pct:.2f}%
+Derived Profit: ${profit:,.2f} ({profit_pct:.2f}% of revenue)
+Commission Rate: {commission_rate_pct:.2f}% of profit
+Estimated Commission: ${buyer_commission:,.2f}
+
+Note: This is an estimate and is subject to change depending on the partner's final adjustment."""
+                
                 print(f"DEBUG: calculate_commission returns: {message!r}")
                 return message
+                
         message = "❌ No matching commission tier found."
         print(f"DEBUG: calculate_commission returns: {message!r}")
         return message
@@ -114,51 +143,31 @@ def find_source_and_values(text):
     if matches:
         matched_key = next(k for k in possible_keys if k.lower() == matches[0])
         rest = text[len(matched_key):].strip()
-        values = parse_numbers(rest)
+        parts_rest = rest.split()
+        values = []
+        try:
+            values = [float(p) for p in parts_rest if is_number(p)]
+        except:
+            return None, []
         return matched_key, values
 
-    # Try first word only with fuzzy matching
+    # If no match, try first word only
     candidate = words[0]
     matches = difflib.get_close_matches(candidate, [k.lower() for k in possible_keys], n=1, cutoff=0.8)
     if matches:
         matched_key = next(k for k in possible_keys if k.lower() == matches[0])
         rest = text[len(matched_key):].strip()
-        values = parse_numbers(rest)
-        return matched_key, values
-
-    # Check aliases (bing → Bing XML, yahoo → Yahoo XML)
-    if candidate in SOURCE_ALIASES:
-        matched_key = SOURCE_ALIASES[candidate]
-        rest = text[len(candidate):].strip()
-        values = parse_numbers(rest)
+        parts_rest = rest.split()
+        values = []
+        try:
+            values = [float(p) for p in parts_rest if is_number(p)]
+        except:
+            return None, []
         return matched_key, values
 
     return None, []
 
-def parse_numbers(text):
-    """
-    Extract numbers from text supporting:
-    - Decimals: 3000.32
-    - Dollar signs: $3000, $1,200.50
-    - Commas: 3,000 or 1,234.56
-    """
-    # Pattern to match currency values: $1,234.56 or 1234.56 or 1,234
-    pattern = r'\$?\s*(\d{1,3}(?:,\d{3})*(?:\.\d{1,2})?|\d+(?:\.\d{1,2})?)'
-    matches = re.findall(pattern, text)
-    
-    values = []
-    for match in matches:
-        # Remove commas and convert to float
-        cleaned = match.replace(',', '')
-        try:
-            values.append(float(cleaned))
-        except ValueError:
-            continue
-    
-    return values
-
 def is_number(s):
-    """Legacy helper - kept for compatibility but parse_numbers is now primary"""
     try:
         float(s)
         return True
@@ -176,14 +185,9 @@ Provide revenue and spend. Example: `RSOC 2000 1500`
 
 Available Sources:
 - Ginsu
-- Bing XML (or just "Bing")
-- Yahoo XML (or just "Yahoo")
+- Bing XML
+- Yahoo XML
 - RSOC
-
-You can use decimals, dollar signs, and commas:
-- `Ginsu 3000.50 2000.25`
-- `Bing $3,000 $2,500`
-- `Yahoo 1,500.75 1,200.50`
 """
     return message
 
