@@ -3,12 +3,12 @@ import logging
 import os
 from flask import Flask, jsonify, request
 from api import MessageApiClient
-from event import MessageReceiveEvent, UrlVerificationEvent
 from commission import calculate_commission
 
 # Load environment variables
 APP_ID = os.getenv("APP_ID")
 APP_SECRET = os.getenv("APP_SECRET")
+VERIFICATION_TOKEN = os.getenv("VERIFICATION_TOKEN", "")
 LARK_HOST = os.getenv("LARK_HOST", "https://open.larksuite.com")
 
 # Debug prints
@@ -39,9 +39,9 @@ def callback_event_handler():
 
     # URL verification challenge
     if req_data.get("type") == "url_verification":
-        event = UrlVerificationEvent(req_data)
+        challenge = req_data.get("challenge")
         print(f"DEBUG: URL verification challenge received")
-        return jsonify({"challenge": event.challenge})
+        return jsonify({"challenge": challenge})
 
     # Extract event type
     event_type = req_data.get("header", {}).get("event_type")
@@ -49,11 +49,10 @@ def callback_event_handler():
 
     # Message received event
     if event_type == "im.message.receive_v1":
-        event = MessageReceiveEvent(req_data)
-        
-        # Extract message details
-        message = event.event.message
-        message_type = message.message_type
+        # Extract message details directly from req_data
+        event_data = req_data.get("event", {})
+        message = event_data.get("message", {})
+        message_type = message.get("message_type")
         
         print(f"DEBUG: Message type: {message_type}")
         
@@ -63,17 +62,19 @@ def callback_event_handler():
             return jsonify({"message": "ignored"}), 200
         
         # Parse message content
-        content = json.loads(message.content)
+        content_str = message.get("content", "{}")
+        content = json.loads(content_str)
         text = content.get("text", "").strip()
         
         # Extract sender information
-        sender = event.event.sender
-        user_open_id = sender.sender_id.get("open_id")
+        sender = event_data.get("sender", {})
+        sender_id = sender.get("sender_id", {})
+        user_open_id = sender_id.get("open_id")
         
         logging.info(f"Received message from {user_open_id}: {text}")
         print(f"DEBUG: Received message from {user_open_id}: {text}")
         
-        # Calculate commission with user mention
+        # Calculate commission
         response_text = calculate_commission(text, user_id=user_open_id)
         
         print(f"DEBUG: Response text: {response_text}")
