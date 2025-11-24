@@ -1,4 +1,5 @@
 import difflib
+import re
 
 COMMISSION_RATES = {
     "Ginsu": [
@@ -56,7 +57,7 @@ def calculate_commission(text, user_id=None):
 
     source, values = find_source_and_values(text)
     if not source:
-        message = f"❌ Invalid source. Available sources: {', '.join(COMMISSION_RATES.keys())}"
+        message = f"❌ Invalid source. Available sources: {', '.join(COMMISSION_RATES.keys())}. Type and enter "Help" to learn more."
         print(f"DEBUG: calculate_commission returns: {message!r}")
         return message
 
@@ -149,6 +150,38 @@ Note: This is an estimate and is subject to change depending on the partner's fi
         print(f"DEBUG: calculate_commission returns: {message!r}")
         return message
 
+def clean_number_string(s):
+    """
+    Remove dollar signs, commas, and other non-numeric characters except decimal points.
+    
+    Args:
+        s: String that might contain $, commas, etc.
+    
+    Returns:
+        Cleaned string with only numbers and decimal point
+    """
+    # Remove $, commas, and spaces
+    cleaned = s.replace('$', '').replace(',', '').replace(' ', '')
+    return cleaned
+
+def is_number(s):
+    """
+    Check if a string can be converted to a float after cleaning.
+    """
+    try:
+        cleaned = clean_number_string(s)
+        float(cleaned)
+        return True
+    except:
+        return False
+
+def parse_number(s):
+    """
+    Parse a string to float after cleaning dollar signs and commas.
+    """
+    cleaned = clean_number_string(s)
+    return float(cleaned)
+
 def find_source_and_values(text):
     text_lower = text.lower().strip()
     possible_keys = list(COMMISSION_RATES.keys())
@@ -164,8 +197,11 @@ def find_source_and_values(text):
         rest = " ".join(words[1:])
         values = []
         try:
-            values = [float(p) for p in rest.split() if is_number(p)]
-        except:
+            # Extract numbers from the rest of the text, handling $ and commas
+            number_strings = rest.split()
+            values = [parse_number(p) for p in number_strings if is_number(p)]
+        except Exception as e:
+            print(f"DEBUG: Error parsing numbers: {e}")
             return None, []
         return matched_key, values
 
@@ -175,12 +211,15 @@ def find_source_and_values(text):
         matches = difflib.get_close_matches(candidate, [k.lower() for k in possible_keys], n=1, cutoff=0.8)
         if matches:
             matched_key = next(k for k in possible_keys if k.lower() == matches[0])
+            # Use original text to preserve case for number extraction
             rest = text[len(matched_key):].strip()
-            parts_rest = rest.split()
             values = []
             try:
-                values = [float(p) for p in parts_rest if is_number(p)]
-            except:
+                # Extract numbers, handling $ and commas
+                number_strings = rest.split()
+                values = [parse_number(p) for p in number_strings if is_number(p)]
+            except Exception as e:
+                print(f"DEBUG: Error parsing numbers: {e}")
                 return None, []
             return matched_key, values
 
@@ -189,32 +228,28 @@ def find_source_and_values(text):
     matches = difflib.get_close_matches(candidate, [k.lower() for k in possible_keys], n=1, cutoff=0.8)
     if matches:
         matched_key = next(k for k in possible_keys if k.lower() == matches[0])
+        # Use original text to preserve case for number extraction
         rest = text[len(matched_key):].strip()
-        parts_rest = rest.split()
         values = []
         try:
-            values = [float(p) for p in parts_rest if is_number(p)]
-        except:
+            # Extract numbers, handling $ and commas
+            number_strings = rest.split()
+            values = [parse_number(p) for p in number_strings if is_number(p)]
+        except Exception as e:
+            print(f"DEBUG: Error parsing numbers: {e}")
             return None, []
         return matched_key, values
 
     return None, []
 
-def is_number(s):
-    try:
-        float(s)
-        return True
-    except:
-        return False
-
 def get_help_message():
     message = """📊 Commission Calculator Help
 
 For Ginsu (based on Spend Ratio = Revenue / Spend):
-Provide revenue and spend. Example: `Ginsu 3000 2000`
+Provide revenue and spend. Example: `Ginsu 3000 2000` or `Ginsu $3,000 $2,000`
 
 For Bing XML, Yahoo XML, RSOC (based on Profit % = (Revenue - Spend) / Spend):
-Provide revenue and spend. Example: `RSOC 2000 1500`
+Provide revenue and spend. Example: `RSOC 2000 1500` or `Bing $2,000 $1,500`
 
 Available Sources:
 - Ginsu
@@ -222,7 +257,7 @@ Available Sources:
 - Yahoo XML (or just "Yahoo")
 - RSOC
 
-You can also use shortened names like "Bing" or "Yahoo" instead of the full "Bing XML" or "Yahoo XML".
+You can use dollar signs ($) and commas (,) in numbers - they will be automatically removed.
 """
     return message
 
