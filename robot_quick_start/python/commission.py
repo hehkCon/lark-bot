@@ -21,6 +21,20 @@ COMMISSION_RATES = {
     ],
 }
 
+# Platform display names (without "XML" suffix)
+PLATFORM_DISPLAY_NAMES = {
+    "Ginsu": "Ginsu",
+    "Bing XML": "Bing",
+    "Yahoo XML": "Yahoo",
+    "RSOC": "RSOC",
+}
+
+# Aliases for user-friendly input (all lowercase)
+SOURCE_ALIASES = {
+    "bing": "Bing XML",
+    "yahoo": "Yahoo XML",
+}
+
 def calculate_commission(text, user_id=None):
     """
     Calculate commission based on sell source and values.
@@ -46,8 +60,8 @@ def calculate_commission(text, user_id=None):
         print(f"DEBUG: calculate_commission returns: {message!r}")
         return message
 
-    # Format user mention
-    user_mention = f'<at user_id="{user_id}"></at>' if user_id else "User"
+    # Get display name for platform
+    display_name = PLATFORM_DISPLAY_NAMES.get(source, source)
 
     if source == "Ginsu":
         if len(values) < 2:
@@ -61,24 +75,26 @@ def calculate_commission(text, user_id=None):
             print(f"DEBUG: calculate_commission returns: {message!r}")
             return message
 
+        # ROI calculation
+        roi_pct = ((revenue - spend) / spend) * 100
+        
+        # Spend ratio for tier matching
         spend_ratio = revenue / spend
 
         for tier in COMMISSION_RATES[source]:
             if spend_ratio >= tier["min_spend_ratio"]:
+                # Company commission (this is the "company profit")
                 company_commission = spend * tier["company_rate"]
-                buyer_commission = company_commission * tier["buyer_rate"]
+                company_rate_pct = tier["company_rate"] * 100
                 
-                # Calculate profit for display
-                profit = revenue - spend
-                profit_pct = (profit / spend) * 100 if spend > 0 else 0
+                # Buyer commission
+                buyer_commission = company_commission * tier["buyer_rate"]
                 commission_rate_pct = tier["buyer_rate"] * 100
                 
-                message = f"""Hey {user_mention}! Here's your {source} commission:
-Platform: {source}
-Revenue: ${revenue:,.2f}
+                message = f"""Platform: {display_name}
 Spend: ${spend:,.2f}
-Spend Ratio: {spend_ratio:.2f}
-Derived Profit: ${profit:,.2f} ({profit_pct:.2f}% of spend)
+ROI: {roi_pct:.2f}%
+Derived Profit: ${company_commission:,.2f} ({company_rate_pct:.2f}% of spend)
 Commission Rate: {commission_rate_pct:.2f}% of company commission
 Estimated Commission: ${buyer_commission:,.2f}
 
@@ -101,25 +117,26 @@ Note: This is an estimate and is subject to change depending on the partner's fi
         revenue, spend = values[0], values[1]
         profit = revenue - spend
         
-        if revenue == 0:
-            message = "❌ Revenue cannot be zero."
+        if spend == 0:
+            message = "❌ Spend cannot be zero."
             print(f"DEBUG: calculate_commission returns: {message!r}")
             return message
 
-        profit_pct = (profit / revenue) * 100
-        roi_pct = ((revenue - spend) / spend) * 100 if spend > 0 else 0
+        # ROI calculation: (Revenue - Spend) / Spend * 100
+        roi_pct = ((revenue - spend) / spend) * 100
+        
+        # Profit % calculation: Profit / Spend * 100
+        profit_pct = (profit / spend) * 100
 
         for tier in COMMISSION_RATES[source]:
             if profit_pct >= tier["min_profit_pct"]:
                 buyer_commission = profit * tier["buyer_rate"]
                 commission_rate_pct = tier["buyer_rate"] * 100
                 
-                message = f"""Hey {user_mention}! Here's your {source} commission:
-Platform: {source}
-Revenue: ${revenue:,.2f}
+                message = f"""Platform: {display_name}
 Spend: ${spend:,.2f}
 ROI: {roi_pct:.2f}%
-Derived Profit: ${profit:,.2f} ({profit_pct:.2f}% of revenue)
+Derived Profit: ${profit:,.2f} ({profit_pct:.2f}% of spend)
 Commission Rate: {commission_rate_pct:.2f}% of profit
 Estimated Commission: ${buyer_commission:,.2f}
 
@@ -133,23 +150,39 @@ Note: This is an estimate and is subject to change depending on the partner's fi
         return message
 
 def find_source_and_values(text):
-    text_lower = text.lower()
+    text_lower = text.lower().strip()
     possible_keys = list(COMMISSION_RATES.keys())
     words = text_lower.split()
-
-    # Try matching first 2 words as source
-    candidate = " ".join(words[:2])
-    matches = difflib.get_close_matches(candidate, [k.lower() for k in possible_keys], n=1, cutoff=0.8)
-    if matches:
-        matched_key = next(k for k in possible_keys if k.lower() == matches[0])
-        rest = text[len(matched_key):].strip()
-        parts_rest = rest.split()
+    
+    if not words:
+        return None, []
+    
+    # Check for alias match first (e.g., "bing" → "Bing XML")
+    first_word = words[0]
+    if first_word in SOURCE_ALIASES:
+        matched_key = SOURCE_ALIASES[first_word]
+        rest = " ".join(words[1:])
         values = []
         try:
-            values = [float(p) for p in parts_rest if is_number(p)]
+            values = [float(p) for p in rest.split() if is_number(p)]
         except:
             return None, []
         return matched_key, values
+
+    # Try matching first 2 words as source (for "Bing XML", "Yahoo XML", etc.)
+    if len(words) >= 2:
+        candidate = " ".join(words[:2])
+        matches = difflib.get_close_matches(candidate, [k.lower() for k in possible_keys], n=1, cutoff=0.8)
+        if matches:
+            matched_key = next(k for k in possible_keys if k.lower() == matches[0])
+            rest = text[len(matched_key):].strip()
+            parts_rest = rest.split()
+            values = []
+            try:
+                values = [float(p) for p in parts_rest if is_number(p)]
+            except:
+                return None, []
+            return matched_key, values
 
     # If no match, try first word only
     candidate = words[0]
@@ -180,14 +213,16 @@ def get_help_message():
 For Ginsu (based on Spend Ratio = Revenue / Spend):
 Provide revenue and spend. Example: `Ginsu 3000 2000`
 
-For Bing XML, Yahoo XML, RSOC (based on Profit % = (Revenue - Spend) / Revenue):
+For Bing XML, Yahoo XML, RSOC (based on Profit % = (Revenue - Spend) / Spend):
 Provide revenue and spend. Example: `RSOC 2000 1500`
 
 Available Sources:
 - Ginsu
-- Bing XML
-- Yahoo XML
+- Bing XML (or just "Bing")
+- Yahoo XML (or just "Yahoo")
 - RSOC
+
+You can also use shortened names like "Bing" or "Yahoo" instead of the full "Bing XML" or "Yahoo XML".
 """
     return message
 
