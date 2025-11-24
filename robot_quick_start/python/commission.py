@@ -57,10 +57,9 @@ def calculate_commission(text, user_id=None):
 
     source, values = find_source_and_values(text)
     if not source:
-        message = f"❌ Invalid source. Available sources: {', '.join(COMMISSION_RATES.keys())}. Type and enter "Help" to learn more."
-        print(f"DEBUG: calculate_commission returns: {message!r}")
-        return message
-
+    message = f"❌ Invalid source. Available sources: {', '.join(COMMISSION_RATES.keys())}\n\nType and enter 'help' to learn more."
+    print(f"DEBUG: calculate_commission returns: {message!r}")
+    return message
     # Get display name for platform
     display_name = PLATFORM_DISPLAY_NAMES.get(source, source)
 
