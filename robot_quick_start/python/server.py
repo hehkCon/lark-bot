@@ -33,19 +33,29 @@ def callback_event_handler():
 
     # POST request - handle Lark events
     req_data = request.get_json()
+    
+    # Enhanced debugging
+    print(f"DEBUG: Received POST data: {json.dumps(req_data, indent=2)}")
 
     # URL verification challenge
     if req_data.get("type") == "url_verification":
         event = UrlVerificationEvent(req_data)
+        print(f"DEBUG: URL verification challenge received")
         return jsonify({"challenge": event.challenge})
 
+    # Extract event type
+    event_type = req_data.get("header", {}).get("event_type")
+    print(f"DEBUG: Event type: {event_type}")
+
     # Message received event
-    if req_data.get("header", {}).get("event_type") == "im.message.receive_v1":
+    if event_type == "im.message.receive_v1":
         event = MessageReceiveEvent(req_data)
         
         # Extract message details
         message = event.event.message
         message_type = message.message_type
+        
+        print(f"DEBUG: Message type: {message_type}")
         
         # Only handle text messages
         if message_type != "text":
@@ -66,18 +76,23 @@ def callback_event_handler():
         # Calculate commission with user mention
         response_text = calculate_commission(text, user_id=user_open_id)
         
+        print(f"DEBUG: Response text: {response_text}")
+        
         # Send response
         try:
             message_api_client.send_text_with_open_id(user_open_id, response_text)
             logging.info(f"Sent response to {user_open_id}")
+            print(f"DEBUG: Successfully sent response")
         except Exception as e:
             logging.error(f"Failed to send message: {e}")
+            print(f"DEBUG: Failed to send message: {e}")
             return jsonify({"error": str(e)}), 500
         
         return jsonify({"message": "success"}), 200
 
     # Unknown event type
-    logging.warning(f"Unknown event type: {req_data.get('header', {}).get('event_type')}")
+    logging.warning(f"Unknown event type: {event_type}")
+    print(f"DEBUG: Full request data for unknown event: {json.dumps(req_data, indent=2)}")
     return jsonify({"message": "unknown event"}), 200
 
 if __name__ == "__main__":
