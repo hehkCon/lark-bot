@@ -123,6 +123,14 @@ def count_creatives_by_creator(creator_name, time_period_str, lark_user_id=None)
         if not creator_name:
             return f"❌ Could not find your Meegle username. Please use your Meegle name instead."
     
+    # Statuses that indicate creative production is complete
+    valid_statuses = [
+        "Compliance Review",
+        "Rejected Creative - Revision",
+        "Ready To Launch",
+        "Creative Performance Monitoring"
+    ]
+    
     try:
         result = client.search_work_items(filters=None)
         
@@ -131,26 +139,76 @@ def count_creatives_by_creator(creator_name, time_period_str, lark_user_id=None)
         
         print(f"DEBUG: Got {len(all_items)} total work items")
         print(f"DEBUG: Looking for creator: {creator_name}")
+        print(f"DEBUG: Valid statuses: {valid_statuses}")
         
-        # Filter client-side by creator name
+        # Filter client-side by creator name and status
         filtered_items = []
         for item in all_items:
+            item_id = item.get('id')
+            item_name = item.get('name')
+            
+            # Get current status from current_nodes
+            current_nodes = item.get("current_nodes", [])
+            current_status = current_nodes[0].get("name") if current_nodes else None
+            
+            # DEBUG: Print first item's fields to see structure
+            if item_id == all_items[0].get('id'):
+                print(f"DEBUG: First item structure:")
+                print(f"  - current_status: {current_status}")
+                fields = item.get("fields", [])
+                for field in fields[:5]:  # Show first 5 fields
+                    print(f"  - field_alias: {field.get('field_alias')}, field_value: {field.get('field_value')}")
+            
             # Look through fields for content_creator
             fields = item.get("fields", [])
+            creator_matched = False
+            
             for field in fields:
                 if field.get("field_alias") == "content_creator":
                     creator_value = field.get("field_value", "")
-                    if creator_name.lower() in str(creator_value).lower():
-                        filtered_items.append(item)
-                        print(f"DEBUG: Matched item - id: {item.get('id')}, name: {item.get('name')}")
+                    
+                    # Only log for first few items to avoid spam
+                    if len(filtered_items) < 3:
+                        print(f"DEBUG: Item {item_id} - Found content_creator field")
+                        print(f"DEBUG: creator_value type: {type(creator_value)}")
+                        print(f"DEBUG: creator_value: {creator_value}")
+                    
+                    # Handle different value types
+                    if isinstance(creator_value, dict):
+                        # Might be {"label": "Aure Williams", "value": "..."}
+                        creator_text = creator_value.get("label", "") or creator_value.get("name", "")
+                    elif isinstance(creator_value, list):
+                        # Might be a list of users
+                        creator_text = " ".join([str(u.get("label", "") or u.get("name", "")) if isinstance(u, dict) else str(u) for u in creator_value])
+                    else:
+                        creator_text = str(creator_value)
+                    
+                    if creator_name.lower() in creator_text.lower():
+                        creator_matched = True
+                        
+                        # Now check if status is valid
+                        if current_status in valid_statuses:
+                            filtered_items.append(item)
+                            print(f"DEBUG: ✅ MATCHED item {item_id} - creator: {creator_text}, status: {current_status}")
+                        else:
+                            print(f"DEBUG: ⚠️ Creator matched but wrong status - item {item_id}, status: {current_status}")
                         break
+            
+            if not creator_matched and len(filtered_items) < 3:
+                print(f"DEBUG: ❌ No creator match for item {item_id}")
         
         response = f"""📊 Creative Stats for {creator_name}
 
 Period: {period_name}
 Total Creatives Completed: {len(filtered_items)}
 
-Note: Showing all creatives by {creator_name} (date filtering coming soon)"""
+Counted statuses:
+• Compliance Review
+• Rejected Creative - Revision
+• Ready To Launch
+• Creative Performance Monitoring
+
+Note: Date filtering coming soon"""
         
         return response
         
@@ -237,5 +295,5 @@ Examples:
 **Test API connection:**
 • creative test
 
-**Note:** Counts are based on items that moved to "Compliance Review" status in the specified period."""
+**Note:** Counts items that have completed Creative Production (in Compliance Review, Rejected Creative - Revision, Ready To Launch, or Creative Performance Monitoring)."""
 
