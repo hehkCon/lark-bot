@@ -1,5 +1,6 @@
 import requests
 import os
+import json
 from datetime import datetime
 import time
 
@@ -9,7 +10,7 @@ class MeegleClient:
         self.plugin_id = os.getenv("MEEGLE_PLUGIN_ID")
         self.plugin_secret = os.getenv("MEEGLE_PLUGIN_SECRET")
         self.project_key = os.getenv("MEEGLE_PROJECT_KEY")
-        self.user_key = os.getenv("MEEGLE_USER_KEY", "")  # Optional
+        self.user_key = os.getenv("MEEGLE_USER_KEY")  # REQUIRED - not optional!
         
         # Corrected base URLs
         self.base_url = f"https://{self.domain}"
@@ -19,8 +20,12 @@ class MeegleClient:
         self.access_token = None
         self.token_expiry = 0
         
+        if not self.user_key:
+            print(f"WARNING: MEEGLE_USER_KEY not set! This is REQUIRED for API calls.")
+        
         print(f"DEBUG: Meegle domain: {self.domain}")
         print(f"DEBUG: Meegle project key: {self.project_key}")
+        print(f"DEBUG: User key: {self.user_key[:10]}..." if self.user_key else "DEBUG: No User Key")
         print(f"DEBUG: Plugin ID: {self.plugin_id[:10]}..." if self.plugin_id else "DEBUG: No Plugin ID")
     
     def get_access_token(self):
@@ -49,6 +54,9 @@ class MeegleClient:
             
             data = response.json()
             
+            # DEBUG: Print full response
+            print(f"DEBUG: Full token response: {json.dumps(data, indent=2)}")
+            
             if data.get("err_code", 0) != 0:
                 error_msg = data.get("err_msg", "Unknown error")
                 print(f"ERROR: Failed to get Meegle token: {error_msg}")
@@ -58,7 +66,7 @@ class MeegleClient:
             expires_in = data.get("expire", 7200)  # Default 2 hours
             self.token_expiry = time.time() + expires_in - 300  # Refresh 5 min early
             
-            print(f"DEBUG: Got Meegle token, expires in {expires_in}s")
+            print(f"DEBUG: Got Meegle token: {self.access_token[:20] if self.access_token else 'None'}..., expires in {expires_in}s")
             
             return self.access_token
             
@@ -72,15 +80,14 @@ class MeegleClient:
         
         headers = {
             "Content-Type": "application/json",
-            "X-PLUGIN-TOKEN": token
+            "X-PLUGIN-TOKEN": token,
+            "X-USER-KEY": self.user_key  # REQUIRED - must be included
         }
-        
-        # Add user key if available
-        if self.user_key:
-            headers["X-USER-KEY"] = self.user_key
         
         if idempotent_uuid:
             headers["X-IDEM-UUID"] = idempotent_uuid
+        
+        print(f"DEBUG: Request headers: X-PLUGIN-TOKEN={token[:20] if token else 'None'}..., X-USER-KEY={self.user_key}")
         
         return headers
     
@@ -165,4 +172,3 @@ class MeegleClient:
             return result
         except Exception as e:
             raise
-
