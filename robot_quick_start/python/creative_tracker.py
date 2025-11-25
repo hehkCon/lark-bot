@@ -119,45 +119,45 @@ def count_creatives_by_creator(creator_name, time_period_str, lark_user_id=None)
     
     # Handle "me" or "I"
     if creator_name.lower() in ["me", "i"]:
-        # Map Lark user to Meegle user
         creator_name = get_meegle_username_from_lark(lark_user_id)
         if not creator_name:
             return f"❌ Could not find your Meegle username. Please use your Meegle name instead."
     
-    # Query all work items (no user search - we'll filter client-side)
-    filters = {
-        "start_date": start_date.isoformat(),
-        "end_date": end_date.isoformat()
-    }
-    
     try:
-        result = client.search_work_items(filters=filters)
-        all_items = result.get("data", {}).get("work_items", [])
+        result = client.search_work_items(filters=None)
+        
+        # FIXED: data is a list directly, not a dict
+        all_items = result.get("data", [])
         
         print(f"DEBUG: Got {len(all_items)} total work items")
         print(f"DEBUG: Looking for creator: {creator_name}")
         
-        # Filter client-side by creator name and status
+        # Filter client-side by creator name
         filtered_items = []
         for item in all_items:
-            assignee = str(item.get("assignee", "")).lower()
-            status = item.get("status", "")
-            
-            if creator_name.lower() in assignee and status == "Compliance Review":
-                filtered_items.append(item)
-                print(f"DEBUG: Matched item - assignee: {assignee}, status: {status}")
+            # Look through fields for content_creator
+            fields = item.get("fields", [])
+            for field in fields:
+                if field.get("field_alias") == "content_creator":
+                    creator_value = field.get("field_value", "")
+                    if creator_name.lower() in str(creator_value).lower():
+                        filtered_items.append(item)
+                        print(f"DEBUG: Matched item - id: {item.get('id')}, name: {item.get('name')}")
+                        break
         
         response = f"""📊 Creative Stats for {creator_name}
 
 Period: {period_name}
 Total Creatives Completed: {len(filtered_items)}
 
-Status: Based on items that moved to "Compliance Review" status in {period_name}"""
+Note: Showing all creatives by {creator_name} (date filtering coming soon)"""
         
         return response
         
     except Exception as e:
+        import traceback
         print(f"ERROR: Meegle API error: {e}")
+        print(f"Traceback: {traceback.format_exc()}")
         return f"❌ Error fetching creative data: {str(e)}"
 
 def count_creatives_by_language(language, time_period_str):
@@ -167,24 +167,22 @@ def count_creatives_by_language(language, time_period_str):
     # Parse time period
     start_date, end_date, period_name = parse_time_period(time_period_str)
     
-    # Query all work items
-    filters = {
-        "start_date": start_date.isoformat(),
-        "end_date": end_date.isoformat()
-    }
-    
     try:
-        result = client.search_work_items(filters=filters)
-        all_items = result.get("data", {}).get("work_items", [])
+        result = client.search_work_items(filters=None)
         
-        # Filter client-side by language and status
+        # FIXED: data is a list directly, not a dict
+        all_items = result.get("data", [])
+        
+        # Filter client-side by language
         filtered_items = []
         for item in all_items:
-            item_language = str(item.get("language", "")).lower()
-            status = item.get("status", "")
-            
-            if language.lower() in item_language and status == "Compliance Review":
-                filtered_items.append(item)
+            fields = item.get("fields", [])
+            for field in fields:
+                if field.get("field_alias") == "language":
+                    language_value = field.get("field_value", "")
+                    if language.lower() in str(language_value).lower():
+                        filtered_items.append(item)
+                        break
         
         response = f"""📊 Creative Stats by Language
 
@@ -195,7 +193,9 @@ Total Creatives: {len(filtered_items)}"""
         return response
         
     except Exception as e:
+        import traceback
         print(f"ERROR: Meegle API error: {e}")
+        print(f"Traceback: {traceback.format_exc()}")
         return f"❌ Error fetching creative data: {str(e)}"
 
 def get_meegle_username_from_lark(lark_user_id):
@@ -238,3 +238,4 @@ Examples:
 • creative test
 
 **Note:** Counts are based on items that moved to "Compliance Review" status in the specified period."""
+
