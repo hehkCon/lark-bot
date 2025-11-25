@@ -4,6 +4,7 @@ import os
 from flask import Flask, jsonify, request
 from api import MessageApiClient
 from commission import calculate_commission
+from creative_tracker import parse_creative_command, count_creatives_by_creator, count_creatives_by_language, get_creative_help
 
 # Load environment variables
 APP_ID = os.getenv("APP_ID")
@@ -74,8 +75,34 @@ def callback_event_handler():
         logging.info(f"Received message from {user_open_id}: {text}")
         print(f"DEBUG: Received message from {user_open_id}: {text}")
         
-        # Calculate commission
-        response_text = calculate_commission(text, user_id=user_open_id)
+        # Check if it's a creative tracking command
+        if text.lower().startswith("creative"):
+            print(f"DEBUG: Detected creative command")
+            parsed = parse_creative_command(text)
+            
+            if parsed is None:
+                # Not a valid creative command, try commission
+                response_text = calculate_commission(text, user_id=user_open_id)
+            elif "error" in parsed:
+                response_text = parsed["error"]
+            elif parsed.get("type") == "help":
+                response_text = get_creative_help()
+            elif parsed["type"] in ["count", "stats"]:
+                response_text = count_creatives_by_creator(
+                    parsed["creator"],
+                    parsed["time_period"],
+                    lark_user_id=user_open_id
+                )
+            elif parsed["type"] == "language":
+                response_text = count_creatives_by_language(
+                    parsed["language"],
+                    parsed["time_period"]
+                )
+            else:
+                response_text = "❌ Unknown creative command"
+        else:
+            # Commission calculation (existing logic)
+            response_text = calculate_commission(text, user_id=user_open_id)
         
         print(f"DEBUG: Response text: {response_text}")
         
@@ -95,6 +122,12 @@ def callback_event_handler():
     logging.warning(f"Unknown event type: {event_type}")
     print(f"DEBUG: Full request data for unknown event: {json.dumps(req_data, indent=2)}")
     return jsonify({"message": "unknown event"}), 200
+
+@app.route("/meegle-webhook", methods=["POST"])
+def meegle_webhook_handler():
+    """Handle Meegle webhook events (placeholder for future use)"""
+    print("DEBUG: Received Meegle webhook")
+    return jsonify({"message": "received"}), 200
 
 if __name__ == "__main__":
     app.run(host="0.0.0.0", port=10000, debug=True)
