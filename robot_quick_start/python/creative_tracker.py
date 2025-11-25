@@ -3,6 +3,15 @@ from datetime import datetime
 from calendar import monthrange
 from meegle_api import MeegleClient
 
+# User ID mapping for content creators
+CREATOR_USER_IDS = {
+    "aure": "7569613836605492757",
+    "aure williams": "7569613836605492757",
+    "alejandra": "7566221514945662485",
+    # Add your user ID
+    "7562186989836045843": "7562186989836045843",  # You (Alejandra based on user_key)
+}
+
 def parse_creative_command(text):
     """
     Parse commands like:
@@ -123,6 +132,15 @@ def count_creatives_by_creator(creator_name, time_period_str, lark_user_id=None)
         if not creator_name:
             return f"❌ Could not find your Meegle username. Please use your Meegle name instead."
     
+    # Look up user ID from name
+    creator_lookup = creator_name.lower()
+    creator_user_id = CREATOR_USER_IDS.get(creator_lookup)
+    
+    if not creator_user_id:
+        return f"❌ Could not find user ID for '{creator_name}'. Known creators: {', '.join([k.title() for k in CREATOR_USER_IDS.keys() if not k.isdigit()])}"
+    
+    print(f"DEBUG: Searching for creator '{creator_name}' with user_id: {creator_user_id}")
+    
     # Statuses that indicate creative production is complete
     valid_statuses = [
         "Compliance Review",
@@ -138,10 +156,9 @@ def count_creatives_by_creator(creator_name, time_period_str, lark_user_id=None)
         all_items = result.get("data", [])
         
         print(f"DEBUG: Got {len(all_items)} total work items")
-        print(f"DEBUG: Looking for creator: {creator_name}")
         print(f"DEBUG: Valid statuses: {valid_statuses}")
         
-        # Filter client-side by creator name and status
+        # Filter client-side by creator user ID and status
         filtered_items = []
         for item in all_items:
             item_id = item.get('id')
@@ -151,53 +168,24 @@ def count_creatives_by_creator(creator_name, time_period_str, lark_user_id=None)
             current_nodes = item.get("current_nodes", [])
             current_status = current_nodes[0].get("name") if current_nodes else None
             
-            # DEBUG: Print first item's fields to see structure
-            if item_id == all_items[0].get('id'):
-                print(f"DEBUG: First item structure:")
-                print(f"  - current_status: {current_status}")
-                fields = item.get("fields", [])
-                for field in fields[:5]:  # Show first 5 fields
-                    print(f"  - field_alias: {field.get('field_alias')}, field_value: {field.get('field_value')}")
-            
             # Look through fields for content_creator
             fields = item.get("fields", [])
-            creator_matched = False
             
             for field in fields:
                 if field.get("field_alias") == "content_creator":
-                    creator_value = field.get("field_value", "")
+                    creator_value = str(field.get("field_value", ""))
                     
-                    # Only log for first few items to avoid spam
-                    if len(filtered_items) < 3:
-                        print(f"DEBUG: Item {item_id} - Found content_creator field")
-                        print(f"DEBUG: creator_value type: {type(creator_value)}")
-                        print(f"DEBUG: creator_value: {creator_value}")
-                    
-                    # Handle different value types
-                    if isinstance(creator_value, dict):
-                        # Might be {"label": "Aure Williams", "value": "..."}
-                        creator_text = creator_value.get("label", "") or creator_value.get("name", "")
-                    elif isinstance(creator_value, list):
-                        # Might be a list of users
-                        creator_text = " ".join([str(u.get("label", "") or u.get("name", "")) if isinstance(u, dict) else str(u) for u in creator_value])
-                    else:
-                        creator_text = str(creator_value)
-                    
-                    if creator_name.lower() in creator_text.lower():
-                        creator_matched = True
-                        
+                    # Match by user ID
+                    if creator_user_id == creator_value:
                         # Now check if status is valid
                         if current_status in valid_statuses:
                             filtered_items.append(item)
-                            print(f"DEBUG: ✅ MATCHED item {item_id} - creator: {creator_text}, status: {current_status}")
+                            print(f"DEBUG: ✅ MATCHED item {item_id} - user_id: {creator_value}, status: {current_status}, name: {item_name}")
                         else:
-                            print(f"DEBUG: ⚠️ Creator matched but wrong status - item {item_id}, status: {current_status}")
+                            print(f"DEBUG: ⚠️ User matched but wrong status - item {item_id}, status: {current_status}")
                         break
-            
-            if not creator_matched and len(filtered_items) < 3:
-                print(f"DEBUG: ❌ No creator match for item {item_id}")
         
-        response = f"""📊 Creative Stats for {creator_name}
+        response = f"""📊 Creative Stats for {creator_name.title()}
 
 Period: {period_name}
 Total Creatives Completed: {len(filtered_items)}
@@ -259,12 +247,11 @@ Total Creatives: {len(filtered_items)}"""
 def get_meegle_username_from_lark(lark_user_id):
     """
     Map Lark user ID to Meegle username
-    You'll need to maintain this mapping - could be in a dict, database, or config file
     """
-    # Example mapping - replace with your actual mapping
+    # Map to Meegle creator name (which will then be looked up in CREATOR_USER_IDS)
     user_mapping = {
-        "ou_18eee86dc3c6f6b223b2c434cffd9198": "Alejandra",  # Your user ID from logs
-        # Add more mappings as needed
+        "ou_18eee86dc3c6f6b223b2c434cffd9198": "alejandra",
+        # Add more Lark to Meegle mappings as needed
     }
     
     return user_mapping.get(lark_user_id)
