@@ -116,12 +116,11 @@ class MeegleClient:
         url = f"{self.api_url}/{self.project_key}/work_item/filter"
         
         # Build payload based on Meegle API spec
+        # FIXED: work_item_type_keys is required, default to ["story"]
         payload = {
-            "page_size": page_size
+            "page_size": page_size,
+            "work_item_type_keys": work_item_type_keys or ["story"]
         }
-        
-        if work_item_type_keys:
-            payload["work_item_type_keys"] = work_item_type_keys
         
         # Add any additional filters
         if filters:
@@ -139,7 +138,7 @@ class MeegleClient:
             )
             
             print(f"DEBUG: Meegle API response status: {response.status_code}")
-            print(f"DEBUG: Meegle API response: {response.text[:500]}")
+            print(f"DEBUG: Meegle API response: {response.text[:1000]}")  # Increased to see more data
             
             response.raise_for_status()
             data = response.json()
@@ -167,9 +166,9 @@ class MeegleClient:
                 - end_date: ISO format date string
                 - language: Language value
         """
-        # Get all work items first
+        # Get all work items of type "story"
         result = self.get_work_items_filtered(
-            work_item_type_keys=None,  # Get all types
+            work_item_type_keys=["story"],
             page_size=100
         )
         
@@ -178,7 +177,10 @@ class MeegleClient:
     def test_connection(self):
         """Test API connection by getting work items"""
         try:
-            result = self.get_work_items_filtered(page_size=10)
+            result = self.get_work_items_filtered(
+                work_item_type_keys=["story"],
+                page_size=10
+            )
             return result
         except Exception as e:
             raise
