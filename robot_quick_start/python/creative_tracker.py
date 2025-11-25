@@ -6,6 +6,8 @@ from meegle_api import MeegleClient
 def parse_creative_command(text):
     """
     Parse commands like:
+    - creative help
+    - creative test
     - creative count Aure this month
     - creative stats Alejandra November
     - creative language Spanish October
@@ -17,13 +19,20 @@ def parse_creative_command(text):
         return None
     
     parts = text.split()
+    
+    # Handle "creative help" (only 2 parts)
+    if len(parts) == 2 and parts[1].lower() == "help":
+        return {"type": "help"}
+    
+    # Handle "creative test" (only 2 parts)
+    if len(parts) == 2 and parts[1].lower() == "test":
+        return {"type": "test"}
+    
+    # Need at least 3 parts for other commands
     if len(parts) < 3:
         return {"error": "Invalid creative command. Type 'creative help' for usage."}
     
     command_type = parts[1].lower()  # count, stats, language
-    
-    if command_type == "help":
-        return {"type": "help"}
     
     if command_type in ["count", "stats"]:
         creator_name = parts[2]
@@ -45,7 +54,7 @@ def parse_creative_command(text):
             "time_period": time_period
         }
     
-    return {"error": f"Unknown creative command: {command_type}"}
+    return {"error": f"Unknown creative command: {command_type}. Type 'creative help' for usage."}
 
 def parse_time_period(time_period_str):
     """
@@ -213,5 +222,7 @@ Examples:
 • October
 • November 2024
 
-**Note:** Counts are based on items that moved to "Compliance Review" status in the specified period."""
+**Test API connection:**
+• creative test
 
+**Note:** Counts are based on items that moved to "Compliance Review" status in the specified period."""

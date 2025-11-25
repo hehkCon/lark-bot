@@ -9,7 +9,12 @@ class MeegleClient:
         self.plugin_id = os.getenv("MEEGLE_PLUGIN_ID")
         self.plugin_secret = os.getenv("MEEGLE_PLUGIN_SECRET")
         self.project_key = os.getenv("MEEGLE_PROJECT_KEY")
-        self.base_url = f"https://{self.domain}/open_api"
+        self.user_key = os.getenv("MEEGLE_USER_KEY", "")  # Optional
+        
+        # Corrected base URLs
+        self.base_url = f"https://{self.domain}"
+        self.bff_url = f"https://{self.domain}/bff/v2"
+        self.api_url = f"https://{self.domain}/open_api"
         
         self.access_token = None
         self.token_expiry = 0
@@ -24,8 +29,8 @@ class MeegleClient:
         if self.access_token and time.time() < self.token_expiry:
             return self.access_token
         
-        # Get new token
-        url = f"https://{self.domain}/open_api/authen/plugin_token"
+        # Get new token - CORRECTED ENDPOINT
+        url = f"{self.bff_url}/authen/plugin_token"
         
         payload = {
             "plugin_id": self.plugin_id,
@@ -36,7 +41,7 @@ class MeegleClient:
             "Content-Type": "application/json"
         }
         
-        print(f"DEBUG: Requesting Meegle access token...")
+        print(f"DEBUG: Requesting Meegle access token from {url}")
         
         try:
             response = requests.post(url, json=payload, headers=headers, timeout=10)
@@ -70,41 +75,37 @@ class MeegleClient:
             "X-PLUGIN-TOKEN": token
         }
         
+        # Add user key if available
+        if self.user_key:
+            headers["X-USER-KEY"] = self.user_key
+        
         if idempotent_uuid:
             headers["X-IDEM-UUID"] = idempotent_uuid
         
         return headers
     
-    def search_work_items(self, filters=None):
+    def get_work_items_filtered(self, work_item_type_keys=None, filters=None, page_size=50):
         """
-        Search for work items in the project
+        Get filtered work items using the /work_item/filter endpoint
         
         Args:
-            filters: Dict with filter criteria
-                - assignee: User name or ID
-                - status: Status name
-                - start_date: ISO format date string
-                - end_date: ISO format date string
-                - language: Language value
+            work_item_type_keys: List of work item types (e.g., ["story"])
+            filters: Additional filter criteria
+            page_size: Number of items per page
         """
-        url = f"{self.base_url}/{self.project_key}/work_items/search"
+        url = f"{self.api_url}/{self.project_key}/work_item/filter"
         
-        payload = {}
+        # Build payload based on Meegle API spec
+        payload = {
+            "page_size": page_size
+        }
         
+        if work_item_type_keys:
+            payload["work_item_type_keys"] = work_item_type_keys
+        
+        # Add any additional filters
         if filters:
-            if "assignee" in filters:
-                payload["assignee"] = filters["assignee"]
-            if "status" in filters:
-                payload["status"] = filters["status"]
-            if "start_date" in filters and "end_date" in filters:
-                payload["date_range"] = {
-                    "start": filters["start_date"],
-                    "end": filters["end_date"]
-                }
-            if "language" in filters:
-                payload["custom_fields"] = {
-                    "language": filters["language"]
-                }
+            payload.update(filters)
         
         print(f"DEBUG: Meegle API request URL: {url}")
         print(f"DEBUG: Meegle API request payload: {payload}")
@@ -134,56 +135,34 @@ class MeegleClient:
             print(f"ERROR: Meegle API request failed: {e}")
             raise
     
-    def get_all_work_items(self):
-        """Get all work items from the project (for testing)"""
-        url = f"{self.base_url}/{self.project_key}/business/all"
+    def search_work_items(self, filters=None):
+        """
+        Search for work items (wrapper for get_work_items_filtered)
         
-        try:
-            response = requests.get(
-                url,
-                headers=self._get_headers(),
-                timeout=10
-            )
-            
-            print(f"DEBUG: Get all items response: {response.status_code}")
-            
-            response.raise_for_status()
-            data = response.json()
-            
-            if data.get("err_code", 0) != 0:
-                error_msg = data.get("err_msg", "Unknown error")
-                raise Exception(f"Meegle API error: {error_msg}")
-            
-            return data
-            
-        except requests.exceptions.RequestException as e:
-            print(f"ERROR: Meegle API request failed: {e}")
-            raise
+        Args:
+            filters: Dict with filter criteria
+                - assignee: User name or ID
+                - status: Status name
+                - start_date: ISO format date string
+                - end_date: ISO format date string
+                - language: Language value
+        """
+        # For now, we'll get all work items and filter client-side
+        # This is a temporary solution until we figure out exact filter syntax
+        
+        # Get all work items first
+        result = self.get_work_items_filtered(
+            work_item_type_keys=None,  # Get all types
+            page_size=100
+        )
+        
+        return result
     
-    def search_user(self, name):
-        """Find user by name"""
-        url = f"{self.base_url}/{self.project_key}/users/search"
-        
-        payload = {"name": name}
-        
+    def test_connection(self):
+        """Test API connection by getting work items"""
         try:
-            response = requests.post(
-                url,
-                headers=self._get_headers(),
-                json=payload,
-                timeout=10
-            )
-            
-            response.raise_for_status()
-            data = response.json()
-            
-            if data.get("err_code", 0) != 0:
-                return None
-            
-            users = data.get("users", [])
-            return users[0] if users else None
-            
-        except requests.exceptions.RequestException as e:
-            print(f"ERROR: User search failed: {e}")
-            return None
+            result = self.get_work_items_filtered(page_size=10)
+            return result
+        except Exception as e:
+            raise
 

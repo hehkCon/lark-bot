@@ -87,6 +87,27 @@ def callback_event_handler():
                 response_text = parsed["error"]
             elif parsed.get("type") == "help":
                 response_text = get_creative_help()
+            elif parsed.get("type") == "test":
+                # Test Meegle API connection
+                try:
+                    from meegle_api import MeegleClient
+                    client = MeegleClient()
+                    result = client.test_connection()
+                    
+                    # Get count of items
+                    items = result.get("data", {}).get("work_items", [])
+                    item_count = len(items)
+                    
+                    response_text = f"""✅ Meegle API Connected!
+
+Items retrieved: {item_count}
+Response structure: {list(result.keys())}
+
+First item preview:
+{str(items[0] if items else 'No items')[:200]}..."""
+                    
+                except Exception as e:
+                    response_text = f"❌ Meegle API test failed: {str(e)}"
             elif parsed["type"] in ["count", "stats"]:
                 response_text = count_creatives_by_creator(
                     parsed["creator"],
@@ -131,4 +152,3 @@ def meegle_webhook_handler():
 
 if __name__ == "__main__":
     app.run(host="0.0.0.0", port=10000, debug=True)
-
