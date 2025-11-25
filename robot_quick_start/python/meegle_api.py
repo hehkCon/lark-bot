@@ -30,8 +30,11 @@ class MeegleClient:
     
     def get_access_token(self):
         """Get or refresh access token using plugin ID and secret"""
+        print("DEBUG: get_access_token VERSION 2.1 - FIXED TOKEN PARSING")
+        
         # Return cached token if still valid
         if self.access_token and time.time() < self.token_expiry:
+            print(f"DEBUG: Using cached token: {self.access_token[:20]}...")
             return self.access_token
         
         # Get new token - CORRECTED ENDPOINT
@@ -70,7 +73,13 @@ class MeegleClient:
             expires_in = token_data.get("expire_time", 7200)  # Default 2 hours
             self.token_expiry = time.time() + expires_in - 300  # Refresh 5 min early
             
-            print(f"DEBUG: Got Meegle token: {self.access_token[:20] if self.access_token else 'None'}..., expires in {expires_in}s")
+            print(f"DEBUG: Parsed token_data: {token_data}")
+            print(f"DEBUG: Extracted token: {self.access_token}")
+            print(f"DEBUG: Token first 20 chars: {self.access_token[:20] if self.access_token else 'None'}...")
+            print(f"DEBUG: Expires in: {expires_in}s")
+            
+            if not self.access_token:
+                raise Exception("Failed to extract token from response")
             
             return self.access_token
             
@@ -173,3 +182,4 @@ class MeegleClient:
             return result
         except Exception as e:
             raise
+
