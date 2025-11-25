@@ -126,6 +126,14 @@ def count_creatives_by_creator(creator_name, time_period_str, lark_user_id=None)
     # Parse time period
     start_date, end_date, period_name = parse_time_period(time_period_str)
     
+    # Convert to milliseconds (Meegle uses epoch milliseconds)
+    start_timestamp = int(start_date.timestamp() * 1000)
+    end_timestamp = int(end_date.timestamp() * 1000)
+    
+    print(f"DEBUG: Period: {period_name}")
+    print(f"DEBUG: Start timestamp: {start_timestamp} ({start_date})")
+    print(f"DEBUG: End timestamp: {end_timestamp} ({end_date})")
+    
     # Handle "me" or "I"
     if creator_name.lower() in ["me", "i"]:
         creator_name = get_meegle_username_from_lark(lark_user_id)
@@ -156,9 +164,19 @@ def count_creatives_by_creator(creator_name, time_period_str, lark_user_id=None)
         all_items = result.get("data", [])
         
         print(f"DEBUG: Got {len(all_items)} total work items")
-        print(f"DEBUG: Valid statuses: {valid_statuses}")
         
-        # Filter client-side by creator user ID and status
+        # DEBUG: Show all field aliases from first item to find completion time field
+        if all_items:
+            first_item_fields = all_items[0].get("fields", [])
+            print(f"DEBUG: All field aliases in first item:")
+            for field in first_item_fields:
+                field_alias = field.get("field_alias")
+                field_type = field.get("field_type_key")
+                field_value = field.get("field_value")
+                if "time" in field_alias.lower() or "date" in field_alias.lower() or field_type == "date":
+                    print(f"  - {field_alias} ({field_type}): {field_value}")
+        
+        # Filter client-side by creator user ID, status, and date
         filtered_items = []
         for item in all_items:
             item_id = item.get('id')
@@ -168,35 +186,51 @@ def count_creatives_by_creator(creator_name, time_period_str, lark_user_id=None)
             current_nodes = item.get("current_nodes", [])
             current_status = current_nodes[0].get("name") if current_nodes else None
             
-            # Look through fields for content_creator
+            # Look through fields for content_creator and completion time
             fields = item.get("fields", [])
+            creator_matched = False
+            completion_time = None
             
             for field in fields:
-                if field.get("field_alias") == "content_creator":
+                field_alias = field.get("field_alias")
+                
+                # Check for content_creator
+                if field_alias == "content_creator":
                     creator_value = str(field.get("field_value", ""))
-                    
-                    # Match by user ID
                     if creator_user_id == creator_value:
-                        # Now check if status is valid
-                        if current_status in valid_statuses:
-                            filtered_items.append(item)
-                            print(f"DEBUG: ✅ MATCHED item {item_id} - user_id: {creator_value}, status: {current_status}, name: {item_name}")
-                        else:
-                            print(f"DEBUG: ⚠️ User matched but wrong status - item {item_id}, status: {current_status}")
-                        break
+                        creator_matched = True
+                
+                # Look for completion time field (adjust field_alias as needed)
+                if "completion" in field_alias.lower() or "finish" in field_alias.lower():
+                    completion_time = field.get("field_value")
+                    print(f"DEBUG: Found completion field '{field_alias}' = {completion_time}")
+            
+            # If creator matched and status valid, check completion time
+            if creator_matched and current_status in valid_statuses:
+                if completion_time:
+                    # Check if completion time is within our period
+                    if start_timestamp <= completion_time <= end_timestamp:
+                        filtered_items.append(item)
+                        
+                        # Convert timestamp to readable date
+                        completion_date = datetime.fromtimestamp(completion_time / 1000)
+                        print(f"DEBUG: ✅ MATCHED item {item_id}")
+                        print(f"  - Name: {item_name}")
+                        print(f"  - Completed on: {completion_date.strftime('%Y-%m-%d %H:%M')}")
+                else:
+                    print(f"DEBUG: ⚠️ Item {item_id} matched but no completion time field found")
         
         response = f"""📊 Creative Stats for {creator_name.title()}
 
 Period: {period_name}
 Total Creatives Completed: {len(filtered_items)}
 
-Counted statuses:
+Counted: Items completed during {period_name}
+Statuses:
 • Compliance Review
 • Rejected Creative - Revision
 • Ready To Launch
-• Creative Performance Monitoring
-
-Note: Date filtering coming soon"""
+• Creative Performance Monitoring"""
         
         return response
         
