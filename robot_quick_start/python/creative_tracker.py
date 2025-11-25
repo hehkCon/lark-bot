@@ -119,33 +119,38 @@ def count_creatives_by_creator(creator_name, time_period_str, lark_user_id=None)
     
     # Handle "me" or "I"
     if creator_name.lower() in ["me", "i"]:
-        # Map Lark user to Meegle user (you'll need to maintain this mapping)
+        # Map Lark user to Meegle user
         creator_name = get_meegle_username_from_lark(lark_user_id)
         if not creator_name:
             return f"❌ Could not find your Meegle username. Please use your Meegle name instead."
     
-    # Search for user in Meegle
-    user = client.search_user(creator_name)
-    if not user:
-        # If user search fails, try using the name directly as a filter
-        print(f"DEBUG: Could not find user via search, will try direct filter")
-    
-    # Query work items
+    # Query all work items (no user search - we'll filter client-side)
     filters = {
-        "assignee": creator_name,  # Use name directly
-        "status": "Compliance Review",  # Status after Creative Production
         "start_date": start_date.isoformat(),
         "end_date": end_date.isoformat()
     }
     
     try:
         result = client.search_work_items(filters=filters)
-        items = result.get("items", [])
+        all_items = result.get("data", {}).get("work_items", [])
+        
+        print(f"DEBUG: Got {len(all_items)} total work items")
+        print(f"DEBUG: Looking for creator: {creator_name}")
+        
+        # Filter client-side by creator name and status
+        filtered_items = []
+        for item in all_items:
+            assignee = str(item.get("assignee", "")).lower()
+            status = item.get("status", "")
+            
+            if creator_name.lower() in assignee and status == "Compliance Review":
+                filtered_items.append(item)
+                print(f"DEBUG: Matched item - assignee: {assignee}, status: {status}")
         
         response = f"""📊 Creative Stats for {creator_name}
 
 Period: {period_name}
-Total Creatives Completed: {len(items)}
+Total Creatives Completed: {len(filtered_items)}
 
 Status: Based on items that moved to "Compliance Review" status in {period_name}"""
         
@@ -162,23 +167,30 @@ def count_creatives_by_language(language, time_period_str):
     # Parse time period
     start_date, end_date, period_name = parse_time_period(time_period_str)
     
-    # Query work items with language filter
+    # Query all work items
     filters = {
-        "status": "Compliance Review",
         "start_date": start_date.isoformat(),
-        "end_date": end_date.isoformat(),
-        "language": language
+        "end_date": end_date.isoformat()
     }
     
     try:
         result = client.search_work_items(filters=filters)
-        items = result.get("items", [])
+        all_items = result.get("data", {}).get("work_items", [])
+        
+        # Filter client-side by language and status
+        filtered_items = []
+        for item in all_items:
+            item_language = str(item.get("language", "")).lower()
+            status = item.get("status", "")
+            
+            if language.lower() in item_language and status == "Compliance Review":
+                filtered_items.append(item)
         
         response = f"""📊 Creative Stats by Language
 
 Language: {language}
 Period: {period_name}
-Total Creatives: {len(items)}"""
+Total Creatives: {len(filtered_items)}"""
         
         return response
         

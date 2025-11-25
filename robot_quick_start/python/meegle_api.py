@@ -10,7 +10,7 @@ class MeegleClient:
         self.plugin_id = os.getenv("MEEGLE_PLUGIN_ID")
         self.plugin_secret = os.getenv("MEEGLE_PLUGIN_SECRET")
         self.project_key = os.getenv("MEEGLE_PROJECT_KEY")
-        self.user_key = os.getenv("MEEGLE_USER_KEY")  # REQUIRED - not optional!
+        self.user_key = os.getenv("MEEGLE_USER_KEY")  # REQUIRED
         
         # Corrected base URLs
         self.base_url = f"https://{self.domain}"
@@ -57,13 +57,17 @@ class MeegleClient:
             # DEBUG: Print full response
             print(f"DEBUG: Full token response: {json.dumps(data, indent=2)}")
             
-            if data.get("err_code", 0) != 0:
-                error_msg = data.get("err_msg", "Unknown error")
+            # Check for error in response
+            error_data = data.get("error", {})
+            if error_data.get("code", 0) != 0:
+                error_msg = error_data.get("msg", "Unknown error")
                 print(f"ERROR: Failed to get Meegle token: {error_msg}")
                 raise Exception(f"Meegle auth error: {error_msg}")
             
-            self.access_token = data.get("plugin_token")
-            expires_in = data.get("expire", 7200)  # Default 2 hours
+            # FIXED: Token is in data.token, not plugin_token
+            token_data = data.get("data", {})
+            self.access_token = token_data.get("token")
+            expires_in = token_data.get("expire_time", 7200)  # Default 2 hours
             self.token_expiry = time.time() + expires_in - 300  # Refresh 5 min early
             
             print(f"DEBUG: Got Meegle token: {self.access_token[:20] if self.access_token else 'None'}..., expires in {expires_in}s")
@@ -81,7 +85,7 @@ class MeegleClient:
         headers = {
             "Content-Type": "application/json",
             "X-PLUGIN-TOKEN": token,
-            "X-USER-KEY": self.user_key  # REQUIRED - must be included
+            "X-USER-KEY": self.user_key  # REQUIRED
         }
         
         if idempotent_uuid:
@@ -154,9 +158,6 @@ class MeegleClient:
                 - end_date: ISO format date string
                 - language: Language value
         """
-        # For now, we'll get all work items and filter client-side
-        # This is a temporary solution until we figure out exact filter syntax
-        
         # Get all work items first
         result = self.get_work_items_filtered(
             work_item_type_keys=None,  # Get all types
