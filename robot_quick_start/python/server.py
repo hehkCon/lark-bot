@@ -22,6 +22,9 @@ app = Flask(__name__)
 # Initialize message client
 message_api_client = MessageApiClient(APP_ID, APP_SECRET, LARK_HOST)
 
+# Track processed events to prevent duplicates
+processed_events = set()
+
 @app.errorhandler(Exception)
 def handle_exception(e):
     logging.error(f"Unhandled exception: {e}", exc_info=True)
@@ -43,6 +46,24 @@ def callback_event_handler():
         challenge = req_data.get("challenge")
         print(f"DEBUG: URL verification challenge received")
         return jsonify({"challenge": challenge})
+
+    # Extract event ID and check for duplicates
+    event_id = req_data.get("header", {}).get("event_id")
+    
+    # DEDUPLICATION: Check if we've already processed this event
+    if event_id in processed_events:
+        print(f"DEBUG: Duplicate event {event_id} - ignoring (already processed)")
+        return jsonify({"message": "duplicate"}), 200
+    
+    # Add to processed events
+    processed_events.add(event_id)
+    
+    # Keep only last 1000 event IDs to prevent memory issues
+    if len(processed_events) > 1000:
+        # Remove oldest event
+        processed_events.clear()
+    
+    print(f"DEBUG: Processing new event {event_id}")
 
     # Extract event type
     event_type = req_data.get("header", {}).get("event_type")
@@ -75,14 +96,17 @@ def callback_event_handler():
         logging.info(f"Received message from {user_open_id}: {text}")
         print(f"DEBUG: Received message from {user_open_id}: {text}")
         
+        # Determine response based on command type
+        response_text = None
+        
         # Check if it's a creative tracking command
         if text.lower().startswith("creative"):
             print(f"DEBUG: Detected creative command")
             parsed = parse_creative_command(text)
             
             if parsed is None:
-                # Not a valid creative command, try commission
-                response_text = calculate_commission(text, user_id=user_open_id)
+                # Not a valid creative command
+                response_text = "❌ Invalid creative command. Type 'creative help' for usage."
             elif "error" in parsed:
                 response_text = parsed["error"]
             elif parsed.get("type") == "help":
@@ -94,11 +118,9 @@ def callback_event_handler():
                     client = MeegleClient()
                     result = client.test_connection()
                     
-                    # FIXED: data is a list, not a dict with "work_items" key
-                    items = result.get("data", [])  # Get the data array directly
+                    items = result.get("data", [])
                     item_count = len(items)
                     
-                    # Show first item details
                     first_item = items[0] if items else None
                     item_name = first_item.get("name", "N/A") if first_item else "No items"
                     item_id = first_item.get("id", "N/A") if first_item else "N/A"
@@ -131,20 +153,21 @@ Full response structure working!"""
             else:
                 response_text = "❌ Unknown creative command"
         else:
-            # Commission calculation (existing logic)
+            # Commission calculation (existing logic) - ONLY if NOT a creative command
             response_text = calculate_commission(text, user_id=user_open_id)
         
         print(f"DEBUG: Response text: {response_text}")
         
-        # Send response
-        try:
-            message_api_client.send_text_with_open_id(user_open_id, response_text)
-            logging.info(f"Sent response to {user_open_id}")
-            print(f"DEBUG: Successfully sent response")
-        except Exception as e:
-            logging.error(f"Failed to send message: {e}")
-            print(f"DEBUG: Failed to send message: {e}")
-            return jsonify({"error": str(e)}), 500
+        # Send response ONCE - single send point
+        if response_text:
+            try:
+                message_api_client.send_text_with_open_id(user_open_id, response_text)
+                logging.info(f"Sent response to {user_open_id}")
+                print(f"DEBUG: Successfully sent response")
+            except Exception as e:
+                logging.error(f"Failed to send message: {e}")
+                print(f"DEBUG: Failed to send message: {e}")
+                return jsonify({"error": str(e)}), 500
         
         return jsonify({"message": "success"}), 200
 
