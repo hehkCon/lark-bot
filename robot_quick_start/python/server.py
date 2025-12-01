@@ -192,6 +192,22 @@ def health_check():
 
 if __name__ == "__main__":
     port = int(os.getenv("PORT", 5000))
-    print(f"DEBUG: Starting server on port {port}")
-    app.run(host="0.0.0.0", port=port, debug=False)
+    print(f"DEBUG: Starting server on 0.0.0.0:{port}")
+    print(f"DEBUG: Performance scheduler running: {performance_scheduler is not None}")
+    print(f"DEBUG: User performance scheduler running: {user_performance_scheduler is not None}")
+    
+    # Make sure Flask binds to the port immediately
+    try:
+        app.run(
+            host="0.0.0.0",
+            port=port,
+            debug=False,
+            use_reloader=False,
+            threaded=True
+        )
+    except Exception as e:
+        print(f"CRITICAL ERROR: Failed to start Flask server: {e}")
+        import traceback
+        traceback.print_exc()
+        exit(1)
 
