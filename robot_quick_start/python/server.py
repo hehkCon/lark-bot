@@ -96,6 +96,13 @@ def callback_event_handler():
         chat_id = message.get("chat_id")
         chat_type = message.get("chat_type")  # "p2p" for 1-on-1, "group" for group chat
         
+        # STRIP MENTION PREFIX from group chat messages
+        # When bot is mentioned in a group, the text includes "@bot_name "
+        if chat_type == "group" and text.startswith("@"):
+            # Remove the mention prefix (e.g., "@_user_1 " -> "")
+            text = text.split(" ", 1)[1] if " " in text else ""
+            print(f"DEBUG: Stripped mention prefix, cleaned text: {text}")
+        
         logging.info(f"Received message from {user_open_id} in {chat_type} chat: {text}")
         print(f"DEBUG: Received message from {user_open_id} in {chat_type} chat (chat_id: {chat_id}): {text}")
         
