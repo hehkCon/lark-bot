@@ -1,234 +1,197 @@
-import json
-import logging
 import os
-from flask import Flask, jsonify, request
-from api import MessageApiClient
-from commission import calculate_commission
-from creative_tracker import parse_creative_command, count_creatives_by_creator, count_creatives_by_language, get_creative_help
+from flask import Flask, request, jsonify
+from dotenv import load_dotenv
+import json
+from api import MessageApiClient, TokenManager
+from lark_base_client import PerformanceTracker
 from performance_scheduler import initialize_performance_scheduler
+from user_performance_scheduler import initialize_user_performance_scheduler
+from performance_commands import PerformanceCommands
+from commission import CommissionCalculator
+from creative import CreativeTracker
 
 # Load environment variables
-APP_ID = os.getenv("APP_ID")
-APP_SECRET = os.getenv("APP_SECRET")
-VERIFICATION_TOKEN = os.getenv("VERIFICATION_TOKEN", "")
-LARK_HOST = os.getenv("LARK_HOST", "https://open.larksuite.com")
+load_dotenv()
 
-# Debug prints
-print(f"DEBUG: APP_ID={APP_ID}")
-print(f"DEBUG: APP_SECRET={'SET' if APP_SECRET else 'NOT SET'}")
-print(f"DEBUG: LARK_HOST={LARK_HOST}")
-
+# Initialize Flask app
 app = Flask(__name__)
 
-# Initialize message client
-message_api_client = MessageApiClient(APP_ID, APP_SECRET, LARK_HOST)
+# Initialize API clients
+token_manager = TokenManager(
+    app_id=os.getenv("LARK_APP_ID"),
+    app_secret=os.getenv("LARK_APP_SECRET")
+)
 
-# Initialize Performance Scheduler
+message_api_client = MessageApiClient(
+    app_id=os.getenv("LARK_APP_ID"),
+    app_secret=os.getenv("LARK_APP_SECRET"),
+    token_manager=token_manager
+)
+
+# Initialize commission calculator
+commission_calculator = CommissionCalculator()
+
+# Initialize creative tracker
+creative_tracker = CreativeTracker(
+    message_api_client=message_api_client,
+    token_manager=token_manager,
+    app_token=os.getenv("LARK_BASE_APP_TOKEN"),
+    table_id=os.getenv("LARK_BASE_CREATIVE_TABLE_ID")
+)
+
+# Initialize Performance Scheduler (sends team messages at 9:10 AM EST)
 performance_scheduler = None
 try:
     performance_scheduler = initialize_performance_scheduler(
         message_api_client=message_api_client,
-        token_manager=message_api_client.token_manager,
-        app_token="GNvrwb1S7iOY2Lkvx5GjA0lwpmo",
-        performance_table_id="tbl25AuF3jVCVa07",
-        projections_table_id="tblMtJTun9mTZyEt"
+        token_manager=token_manager,
+        app_token=os.getenv("LARK_BASE_APP_TOKEN"),
+        performance_table_id=os.getenv("LARK_BASE_PERFORMANCE_TABLE_ID"),
+        projections_table_id=os.getenv("LARK_BASE_PROJECTIONS_TABLE_ID")
     )
     print("DEBUG: Performance scheduler initialized successfully")
 except Exception as e:
     print(f"ERROR: Failed to initialize performance scheduler: {e}")
     performance_scheduler = None
 
-# Track processed events to prevent duplicates
-processed_events = set()
+# Initialize User Performance Scheduler (sends individual messages at 9:50 AM EST)
+user_performance_scheduler = None
+try:
+    user_performance_scheduler = initialize_user_performance_scheduler(
+        message_api_client=message_api_client,
+        token_manager=token_manager,
+        app_token=os.getenv("LARK_BASE_APP_TOKEN"),
+        performance_table_id=os.getenv("LARK_BASE_PERFORMANCE_TABLE_ID"),
+        lark_user_id_table_id=os.getenv("LARK_BASE_USER_INFO_TABLE_ID")
+    )
+    print("DEBUG: User performance scheduler initialized successfully")
+except Exception as e:
+    print(f"ERROR: Failed to initialize user performance scheduler: {e}")
+    user_performance_scheduler = None
 
-@app.errorhandler(Exception)
-def handle_exception(e):
-    logging.error(f"Unhandled exception: {e}", exc_info=True)
-    return jsonify({"error": str(e)}), 500
 
-@app.route("/", methods=["GET", "POST"])
 def callback_event_handler():
-    if request.method == "GET":
-        return jsonify({"message": "Bot is running"}), 200
-
-    # POST request - handle Lark events
-    req_data = request.get_json()
-    
-    # Enhanced debugging
-    print(f"DEBUG: Received POST data: {json.dumps(req_data, indent=2)}")
-
-    # URL verification challenge
-    if req_data.get("type") == "url_verification":
-        challenge = req_data.get("challenge")
-        print(f"DEBUG: URL verification challenge received")
-        return jsonify({"challenge": challenge})
-
-    # Extract event ID and check for duplicates
-    event_id = req_data.get("header", {}).get("event_id")
-    
-    # DEDUPLICATION: Check if we've already processed this event
-    if event_id in processed_events:
-        print(f"DEBUG: Duplicate event {event_id} - ignoring (already processed)")
-        return jsonify({"message": "duplicate"}), 200
-    
-    # Add to processed events
-    processed_events.add(event_id)
-    
-    # Keep only last 1000 event IDs to prevent memory issues
-    if len(processed_events) > 1000:
-        processed_events.clear()
-    
-    print(f"DEBUG: Processing new event {event_id}")
-
-    # Extract event type
-    event_type = req_data.get("header", {}).get("event_type")
-    print(f"DEBUG: Event type: {event_type}")
-
-    # Message received event
-    if event_type == "im.message.receive_v1":
-        # Extract message details directly from req_data
-        event_data = req_data.get("event", {})
-        message = event_data.get("message", {})
-        message_type = message.get("message_type")
+    """Handle incoming Lark messages"""
+    try:
+        # Get message data
+        data = request.get_json()
         
-        print(f"DEBUG: Message type: {message_type}")
+        # Verify token
+        challenge = data.get("challenge")
+        if challenge:
+            print("DEBUG: Challenge received, responding with challenge")
+            return jsonify({"challenge": challenge})
         
-        # Only handle text messages
-        if message_type != "text":
-            logging.info(f"Ignoring non-text message type: {message_type}")
-            return jsonify({"message": "ignored"}), 200
+        # Extract message content
+        message_data = data.get("event", {}).get("message", {})
+        text = message_data.get("content")
+        
+        if not text:
+            return jsonify({"code": 0})
         
         # Parse message content
-        content_str = message.get("content", "{}")
-        content = json.loads(content_str)
-        text = content.get("text", "").strip()
+        try:
+            content_dict = json.loads(text)
+            text = content_dict.get("text", "").strip()
+        except:
+            pass
         
-        # Extract sender information
-        sender = event_data.get("sender", {})
-        sender_id = sender.get("sender_id", {})
-        user_open_id = sender_id.get("open_id")
+        if not text:
+            return jsonify({"code": 0})
         
-        # Extract chat information (works for both 1-on-1 and group)
-        chat_id = message.get("chat_id")
-        chat_type = message.get("chat_type")  # "p2p" for 1-on-1, "group" for group chat
+        # Get sender info
+        sender = data.get("event", {}).get("sender", {})
+        user_open_id = sender.get("id")
         
-        # STRIP MENTION PREFIX from group chat messages
-        # When bot is mentioned in a group, the text includes "@bot_name "
-        if chat_type == "group" and text.startswith("@"):
-            # Remove the mention prefix (e.g., "@_user_1 " -> "")
-            text = text.split(" ", 1)[1] if " " in text else ""
-            print(f"DEBUG: Stripped mention prefix, cleaned text: {text}")
+        print(f"DEBUG: Received message from {user_open_id}: {text}")
         
-        logging.info(f"Received message from {user_open_id} in {chat_type} chat: {text}")
-        print(f"DEBUG: Received message from {user_open_id} in {chat_type} chat (chat_id: {chat_id}): {text}")
-        
-        # Determine response based on command type
+        # Initialize response
         response_text = None
         
-        # Check if it's a creative tracking command
-        if text.lower().startswith("creative"):
-            print(f"DEBUG: Detected creative command")
-            parsed = parse_creative_command(text)
-            
-            if parsed is None:
-                # Not a valid creative command
-                response_text = "❌ Invalid creative command. Type 'creative help' for usage."
-            elif "error" in parsed:
-                response_text = parsed["error"]
-            elif parsed.get("type") == "help":
-                response_text = get_creative_help()
-            elif parsed.get("type") == "test":
-                # Test Meegle API connection
-                try:
-                    from meegle_api import MeegleClient
-                    client = MeegleClient()
-                    result = client.test_connection()
-                    
-                    items = result.get("data", [])
-                    item_count = len(items)
-                    
-                    first_item = items[0] if items else None
-                    item_name = first_item.get("name", "N/A") if first_item else "No items"
-                    item_id = first_item.get("id", "N/A") if first_item else "N/A"
-                    
-                    response_text = f"""✅ Meegle API Connected!
-
-Items retrieved: {item_count}
-Response keys: {list(result.keys())}
-
-First item:
-- ID: {item_id}
-- Name: {item_name}
-
-Full response structure working!"""
-                    
-                except Exception as e:
-                    import traceback
-                    response_text = f"❌ Meegle API test failed: {str(e)}\n\nTraceback:\n{traceback.format_exc()}"
-            elif parsed["type"] in ["count", "stats"]:
-                response_text = count_creatives_by_creator(
-                    parsed["creator"],
-                    parsed["time_period"],
-                    lark_user_id=user_open_id
-                )
-            elif parsed["type"] == "language":
-                response_text = count_creatives_by_language(
-                    parsed["language"],
-                    parsed["time_period"]
-                )
-            else:
-                response_text = "❌ Unknown creative command"
-        else:
-            # Commission calculation (existing logic) - ONLY if NOT a creative command
-            response_text = calculate_commission(text, user_id=user_open_id)
-        
-        print(f"DEBUG: Response text: {response_text}")
-        
-        # Send response ONCE - single send point
-        if response_text:
+        # ========== PERFORMANCE COMMANDS ==========
+        if text.lower().startswith("perf"):
+            print(f"DEBUG: Detected performance command")
             try:
-                # For group chats, send to the chat; for 1-on-1, send to user
-                if chat_type == "group":
-                    print(f"DEBUG: Sending to group chat {chat_id}")
-                    message_api_client.send_text_with_chat_id(chat_id, response_text)
-                else:
-                    print(f"DEBUG: Sending to user {user_open_id}")
-                    message_api_client.send_text_with_open_id(user_open_id, response_text)
+                # Fetch user data if not already fetched
+                temp_tracker = PerformanceTracker(
+                    app_token=os.getenv("LARK_BASE_APP_TOKEN"),
+                    performance_table_id=os.getenv("LARK_BASE_PERFORMANCE_TABLE_ID"),
+                    projections_table_id=os.getenv("LARK_BASE_USER_INFO_TABLE_ID"),
+                    tenant_access_token=token_manager.get_token(),
+                    host="https://open.larksuite.com"
+                )
+                user_data = temp_tracker.get_user_data()
+                performance_commands_handler = PerformanceCommands(temp_tracker, user_data)
                 
-                logging.info(f"Sent response to {chat_type} chat")
-                print(f"DEBUG: Successfully sent response")
+                response_text = performance_commands_handler.handle_performance_command(text, user_open_id)
             except Exception as e:
-                logging.error(f"Failed to send message: {e}")
-                print(f"DEBUG: Failed to send message: {e}")
-                return jsonify({"error": str(e)}), 500
+                print(f"ERROR: Performance command error: {e}")
+                response_text = f"❌ Error fetching performance data: {str(e)}"
         
-        return jsonify({"message": "success"}), 200
+        # ========== COMMISSION CALCULATOR ==========
+        elif text and any(text.upper().startswith(platform) for platform in ["GINSU", "BING", "YAHOO", "RSOC"]):
+            print("DEBUG: Detected commission calculation command")
+            response_text = commission_calculator.calculate(text)
+        
+        # ========== CREATIVE TRACKER ==========
+        elif text.lower().startswith("creative"):
+            print("DEBUG: Detected creative tracker command")
+            response_text = creative_tracker.handle_command(text, user_open_id)
+        
+        # ========== UNKNOWN COMMAND ==========
+        else:
+            response_text = """👋 **Hello!**
 
-    # Unknown event type
-    logging.warning(f"Unknown event type: {event_type}")
-    print(f"DEBUG: Full request data for unknown event: {json.dumps(req_data, indent=2)}")
-    return jsonify({"message": "unknown event"}), 200
+I'm your BASE Media Buying Bot. Here's what I can do:
 
-@app.route("/meegle-webhook", methods=["POST"])
-def meegle_webhook_handler():
-    """Handle Meegle webhook events (placeholder for future use)"""
-    print("DEBUG: Received Meegle webhook")
-    return jsonify({"message": "received"}), 200
+**💰 Commission Calculator**
+• `Ginsu 5000 4000` - Calculate commission
+• `RSOC $3,000 $2,500` - Works with $ and commas!
 
-@app.route("/performance-test", methods=["GET"])
-def performance_test():
-    """Manual endpoint to test performance scheduler (for debugging)"""
-    if performance_scheduler is None:
-        return jsonify({"error": "Performance scheduler not initialized"}), 500
+**📊 Creative Tracker**
+• `creative count Alejandra this month` - Track creatives
+• `creative help` - See all commands
+
+**📈 Performance Tracker**
+• `perf me` - Your performance
+• `perf team` - All teams
+• `perf amanda` - Amanda's Team
+• `perf help` - See all commands
+
+Type any command to get started! 🚀"""
+        
+        # Send response
+        if response_text:
+            print(f"DEBUG: Sending response: {response_text[:100]}...")
+            message_api_client.send_text_with_open_id(user_open_id, response_text)
+        
+        return jsonify({"code": 0})
     
-    try:
-        print("DEBUG: Manual performance test triggered")
-        performance_scheduler._send_all_team_updates()
-        return jsonify({"message": "Performance update sent to all teams"}), 200
     except Exception as e:
-        print(f"ERROR: Performance test failed: {e}")
-        return jsonify({"error": str(e)}), 500
+        print(f"ERROR: Exception in callback_event_handler: {e}")
+        import traceback
+        traceback.print_exc()
+        return jsonify({"code": 1, "msg": str(e)})
+
+
+@app.route("/webhook/event", methods=["POST"])
+def webhook_event():
+    """Webhook endpoint for Lark events"""
+    return callback_event_handler()
+
+
+@app.route("/health", methods=["GET"])
+def health_check():
+    """Health check endpoint"""
+    return jsonify({
+        "status": "ok",
+        "performance_scheduler": "running" if performance_scheduler and performance_scheduler.running else "not running",
+        "user_performance_scheduler": "running" if user_performance_scheduler and user_performance_scheduler.running else "not running"
+    })
+
 
 if __name__ == "__main__":
-    app.run(host="0.0.0.0", port=10000, debug=True)
+    port = int(os.getenv("PORT", 5000))
+    print(f"DEBUG: Starting server on port {port}")
+    app.run(host="0.0.0.0", port=port, debug=False)
 
