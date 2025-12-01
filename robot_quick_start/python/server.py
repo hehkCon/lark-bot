@@ -5,6 +5,7 @@ from flask import Flask, jsonify, request
 from api import MessageApiClient
 from commission import calculate_commission
 from creative_tracker import parse_creative_command, count_creatives_by_creator, count_creatives_by_language, get_creative_help
+from performance_scheduler import initialize_performance_scheduler
 
 # Load environment variables
 APP_ID = os.getenv("APP_ID")
@@ -21,6 +22,21 @@ app = Flask(__name__)
 
 # Initialize message client
 message_api_client = MessageApiClient(APP_ID, APP_SECRET, LARK_HOST)
+
+# Initialize Performance Scheduler
+performance_scheduler = None
+try:
+    performance_scheduler = initialize_performance_scheduler(
+        message_api_client=message_api_client,
+        token_manager=message_api_client.token_manager,
+        app_token="GNvrwb1S7iOY2Lkvx5GjA0lwpmo",
+        performance_table_id="tbl25AuF3jVCVa07",
+        projections_table_id="tblMtJTun9mTZyEt"
+    )
+    print("DEBUG: Performance scheduler initialized successfully")
+except Exception as e:
+    print(f"ERROR: Failed to initialize performance scheduler: {e}")
+    performance_scheduler = None
 
 # Track processed events to prevent duplicates
 processed_events = set()
@@ -198,6 +214,20 @@ def meegle_webhook_handler():
     """Handle Meegle webhook events (placeholder for future use)"""
     print("DEBUG: Received Meegle webhook")
     return jsonify({"message": "received"}), 200
+
+@app.route("/performance-test", methods=["GET"])
+def performance_test():
+    """Manual endpoint to test performance scheduler (for debugging)"""
+    if performance_scheduler is None:
+        return jsonify({"error": "Performance scheduler not initialized"}), 500
+    
+    try:
+        print("DEBUG: Manual performance test triggered")
+        performance_scheduler._send_all_team_updates()
+        return jsonify({"message": "Performance update sent to all teams"}), 200
+    except Exception as e:
+        print(f"ERROR: Performance test failed: {e}")
+        return jsonify({"error": str(e)}), 500
 
 if __name__ == "__main__":
     app.run(host="0.0.0.0", port=10000, debug=True)
