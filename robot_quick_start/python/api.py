@@ -103,5 +103,11 @@ class MessageApiClient:
         return response.json()
 
     def send_text_with_open_id(self, open_id, message):
+        """Send text message to a user (1-on-1 chat)"""
         return self.send("open_id", open_id, "text", message)
+
+    def send_text_with_chat_id(self, chat_id, message):
+        """Send text message to a group chat"""
+        print(f"DEBUG: Sending message to group chat {chat_id}")
+        return self.send("chat_id", chat_id, "text", message)
 

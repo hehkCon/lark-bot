@@ -60,7 +60,6 @@ def callback_event_handler():
     
     # Keep only last 1000 event IDs to prevent memory issues
     if len(processed_events) > 1000:
-        # Remove oldest event
         processed_events.clear()
     
     print(f"DEBUG: Processing new event {event_id}")
@@ -93,8 +92,12 @@ def callback_event_handler():
         sender_id = sender.get("sender_id", {})
         user_open_id = sender_id.get("open_id")
         
-        logging.info(f"Received message from {user_open_id}: {text}")
-        print(f"DEBUG: Received message from {user_open_id}: {text}")
+        # Extract chat information (works for both 1-on-1 and group)
+        chat_id = message.get("chat_id")
+        chat_type = message.get("chat_type")  # "p2p" for 1-on-1, "group" for group chat
+        
+        logging.info(f"Received message from {user_open_id} in {chat_type} chat: {text}")
+        print(f"DEBUG: Received message from {user_open_id} in {chat_type} chat (chat_id: {chat_id}): {text}")
         
         # Determine response based on command type
         response_text = None
@@ -161,8 +164,15 @@ Full response structure working!"""
         # Send response ONCE - single send point
         if response_text:
             try:
-                message_api_client.send_text_with_open_id(user_open_id, response_text)
-                logging.info(f"Sent response to {user_open_id}")
+                # For group chats, send to the chat; for 1-on-1, send to user
+                if chat_type == "group":
+                    print(f"DEBUG: Sending to group chat {chat_id}")
+                    message_api_client.send_text_with_chat_id(chat_id, response_text)
+                else:
+                    print(f"DEBUG: Sending to user {user_open_id}")
+                    message_api_client.send_text_with_open_id(user_open_id, response_text)
+                
+                logging.info(f"Sent response to {chat_type} chat")
                 print(f"DEBUG: Successfully sent response")
             except Exception as e:
                 logging.error(f"Failed to send message: {e}")
