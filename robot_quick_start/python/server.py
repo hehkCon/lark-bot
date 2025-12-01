@@ -7,7 +7,7 @@ from lark_base_client import PerformanceTracker
 from performance_scheduler import initialize_performance_scheduler
 from user_performance_scheduler import initialize_user_performance_scheduler
 from performance_commands import PerformanceCommands
-from commission import CommissionCalculator
+from commission import calculate_commission
 from creative import CreativeTracker
 
 # Load environment variables
@@ -27,9 +27,6 @@ message_api_client = MessageApiClient(
     app_secret=os.getenv("LARK_APP_SECRET"),
     token_manager=token_manager
 )
-
-# Initialize commission calculator
-commission_calculator = CommissionCalculator()
 
 # Initialize creative tracker
 creative_tracker = CreativeTracker(
@@ -131,7 +128,7 @@ def callback_event_handler():
         # ========== COMMISSION CALCULATOR ==========
         elif text and any(text.upper().startswith(platform) for platform in ["GINSU", "BING", "YAHOO", "RSOC"]):
             print("DEBUG: Detected commission calculation command")
-            response_text = commission_calculator.calculate(text)
+            response_text = calculate_commission(text, user_open_id)
         
         # ========== CREATIVE TRACKER ==========
         elif text.lower().startswith("creative"):
