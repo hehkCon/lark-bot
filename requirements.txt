@@ -2,4 +2,5 @@ Flask
 requests
 pycryptodome
 python-dotenv
-
+Werkzeug<3
+pytz
