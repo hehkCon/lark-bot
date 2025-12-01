@@ -100,7 +100,9 @@ class PerformanceCommands:
         
         team_mapping = self.get_team_mapping()
         
-        message = f"""📊 **Team Performance - {date_label}**\n\n"""
+        message = f"""📊 **Team Performance - {date_label}**
+
+"""
         
         total_revenue = 0
         total_profit = 0
@@ -167,7 +169,9 @@ class PerformanceCommands:
         
         team_emails = team_mapping[team_name]
         
-        message = f"""📊 **{team_name} - {date_label}**\n\n"""
+        message = f"""📊 **{team_name} - {date_label}**
+
+"""
         
         team_revenue = 0
         team_profit = 0
@@ -322,4 +326,9 @@ class PerformanceCommands:
 • `perf amanda.g@intentt.com mtd` - Month to date
 
 **Examples:**
+perf me
+perf me mtd
+perf team last 7
+perf amanda mtd
+perf amanda.g@intentt.com last 7"""
 
