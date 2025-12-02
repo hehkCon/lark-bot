@@ -1,5 +1,6 @@
 from datetime import datetime, timedelta
 from typing import Dict, List, Any
+import re
 from lark_base_client import PerformanceTracker
 
 class PerformanceCommands:
@@ -66,6 +67,22 @@ class PerformanceCommands:
         print(f"DEBUG: Found {len(team_records)} records for {team_name} (managers: {target_emails})")
         return team_records
 
+    def _get_user_records(self, email: str, date_range: tuple) -> List[Dict]:
+        """Get performance records for specific user by campaign_manager email"""
+        all_records = self.performance_tracker.get_performance_records(date_range)
+        user_records = []
+        
+        for record in all_records:
+            fields = record.get("fields", {})
+            campaign_manager_field = fields.get("campaign_manager", [{}])[0]
+            campaign_manager = campaign_manager_field.get("text", "").lower() if campaign_manager_field else ""
+            
+            if email in campaign_manager:
+                user_records.append(record)
+        
+        print(f"DEBUG: Found {len(user_records)} records for user {email}")
+        return user_records
+
     def _aggregate_performance(self, records: List[Dict]) -> Dict[str, Any]:
         """Aggregate performance metrics from records - calculates ROI"""
         total_spend = 0
@@ -98,25 +115,23 @@ class PerformanceCommands:
         }
 
     def _format_performance_message(self, title: str, date_range: tuple, records: List[Dict]) -> str:
-        """Format performance message as compact inline summary"""
+        """Format performance message with quoted block style"""
         start_date, end_date = date_range
-        
+
         if not records:
             date_label = f"{start_date}" if start_date == end_date else f"{start_date} to {end_date}"
-            return f"📊 **{title} - {date_label}**: No performance data found."
-        
+            return f"�� **{title} - {date_label}**\n\nNo performance data found for this period."
+
         agg = self._aggregate_performance(records)
         date_label = f"{start_date}" if start_date == end_date else f"{start_date} to {end_date}"
-        
-        message = (
-            f"📊 **{title} - {date_label}**: "
-            f"{agg['records']} records, "
-            f"${agg['spend']:,.0f} spend, "
-            f"${agg['revenue']:,.0f} revenue, "
-            f"${agg['profit']:,.0f} profit, "
-            f"ROI {agg['roi']:.1f}%"
-        )
-        
+
+        message = f"📊 **{title} - {date_label}**\n"
+        message += f"> Records: {agg['records']}\n"
+        message += f"> Spend: ${agg['spend']:,.0f}\n"
+        message += f"> Revenue: ${agg['revenue']:,.0f}\n"
+        message += f"> Profit: ${agg['profit']:,.0f}\n"
+        message += f"> ROI: {agg['roi']:.1f}%\n"
+
         return message
 
     def handle_performance_command(self, text: str, user_open_id: str) -> str:
@@ -144,10 +159,15 @@ class PerformanceCommands:
             records = self.performance_tracker.get_performance_records(date_range)
             return self._format_performance_message("Your Performance", date_range, records)
         
-        # Email-based user lookup
+        # Email-based user lookup - FIXED ✅
         elif "@" in command_type:
-            records = self.performance_tracker.get_performance_records(date_range)
-            return self._format_performance_message(f"{command_type}'s Performance", date_range, records)
+            # Extract clean email (remove mailto: and brackets)
+            clean_email = re.sub(r'\[|\]|\(mailto:|\)', '', command_type).strip().lower()
+            records = self._get_user_records(clean_email, date_range)
+            
+            # Get user name from user_data if available
+            user_name = self.user_data.get(clean_email, {}).get("name", clean_email.split('@')[0].title())
+            return self._format_performance_message(f"{user_name}'s Performance", date_range, records)
         
         return self._get_help_text()
 
@@ -164,5 +184,6 @@ class PerformanceCommands:
 **Examples:**
 • `perf amanda yesterday`
 • `perf team last 7`
-• `perf kath mtd`"""
+• `perf kath mtd`
+• `perf jonas.f@intentt.com last 7`"""
 
