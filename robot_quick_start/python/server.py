@@ -45,44 +45,63 @@ def callback_event_handler():
     try:
         # Get message data
         data = request.get_json()
-        
+
         # Verify token
         challenge = data.get("challenge")
         if challenge:
             print("DEBUG: Challenge received, responding with challenge")
             return jsonify({"challenge": challenge})
-        
-        # Extract message content
-        message_data = data.get("event", {}).get("message", {})
-        text = message_data.get("content")
-        
+
+        # Handle event
+        event = data.get("event", {})
+
+        # Extract message content from message field
+        message = event.get("message", {})
+        text = message.get("content", "")
+
         if not text:
             return jsonify({"code": 0})
-        
-        # Parse message content
+
+        # Parse message content - handle JSON format
         try:
             content_dict = json.loads(text)
-            text = content_dict.get("text", "").strip()
+            if isinstance(content_dict, dict) and "text" in content_dict:
+                text = content_dict.get("text", "").strip()
+            else:
+                text = text.strip()
         except:
-            pass
-        
+            text = text.strip()
+
         if not text:
             return jsonify({"code": 0})
-        
-        # Get sender info
-        sender = data.get("event", {}).get("sender", {})
-        user_open_id = sender.get("id")
-        
+
+        # Get sender info - try multiple possible locations
+        sender = event.get("sender", {})
+        user_open_id = (
+            sender.get("sender_id")
+            or sender.get("id")
+            or sender.get("open_id")
+        )
+
+        # Also check in message for sender_id
+        if not user_open_id:
+            user_open_id = message.get("sender_id") or message.get("open_id")
+
+        print(f"DEBUG: Event data: {json.dumps(event, indent=2)[:500]}")
+        print(f"DEBUG: Sender: {json.dumps(sender, indent=2)}")
         print(f"DEBUG: Received message from {user_open_id}: {text}")
-        
+
+        if not user_open_id:
+            print("ERROR: Could not extract user_open_id from sender")
+            return jsonify({"code": 0})
+
         # Initialize response
         response_text = None
-        
+
         # ========== PERFORMANCE COMMANDS ==========
         if text.lower().startswith("perf"):
-            print(f"DEBUG: Detected performance command")
+            print("DEBUG: Detected performance command")
             try:
-                # Fetch user data if not already fetched
                 temp_tracker = PerformanceTracker(
                     app_token=os.getenv("LARK_BASE_APP_TOKEN"),
                     performance_table_id=os.getenv("LARK_BASE_PERFORMANCE_TABLE_ID"),
@@ -92,45 +111,59 @@ def callback_event_handler():
                 )
                 user_data = temp_tracker.get_user_data()
                 performance_commands_handler = PerformanceCommands(temp_tracker, user_data)
-                
-                response_text = performance_commands_handler.handle_performance_command(text, user_open_id)
+
+                response_text = performance_commands_handler.handle_performance_command(
+                    text, user_open_id
+                )
             except Exception as e:
                 print(f"ERROR: Performance command error: {e}")
+                import traceback
+                traceback.print_exc()
                 response_text = f"❌ Error fetching performance data: {str(e)}"
-        
+
         # ========== COMMISSION CALCULATOR ==========
-        elif text and any(text.upper().startswith(platform) for platform in ["GINSU", "BING", "YAHOO", "RSOC"]):
+        elif text and any(
+            text.upper().startswith(platform)
+            for platform in ["GINSU", "BING", "YAHOO", "RSOC"]
+        ):
             print("DEBUG: Detected commission calculation command")
             response_text = calculate_commission(text, user_open_id)
-        
+
         # ========== CREATIVE TRACKER ==========
         elif text.lower().startswith("creative"):
             print("DEBUG: Detected creative tracker command")
             try:
                 command = parse_creative_command(text)
-                
+
                 if command and command.get("type") == "help":
                     response_text = get_creative_help()
                 elif command and command.get("type") == "test":
                     try:
                         from meegle_api import MeegleClient
+
                         client = MeegleClient()
-                        result = client.test_connection()
+                        _ = client.test_connection()
                         response_text = "✅ Meegle connection successful!"
                     except Exception as e:
                         response_text = f"❌ Meegle connection failed: {str(e)}"
                 elif command and command.get("type") == "count":
-                    response_text = count_creatives_by_creator(command["creator"], command["time_period"], user_open_id)
+                    response_text = count_creatives_by_creator(
+                        command["creator"], command["time_period"], user_open_id
+                    )
                 elif command and command.get("type") == "language":
-                    response_text = count_creatives_by_language(command["language"], command["time_period"])
+                    response_text = count_creatives_by_language(
+                        command["language"], command["time_period"]
+                    )
                 elif command and "error" in command:
                     response_text = command["error"]
                 else:
                     response_text = get_creative_help()
             except Exception as e:
                 print(f"ERROR: Creative tracker error: {e}")
+                import traceback
+                traceback.print_exc()
                 response_text = f"❌ Error in creative tracker: {str(e)}"
-        
+
         # ========== UNKNOWN COMMAND ==========
         else:
             response_text = """👋 **Hello!**
@@ -152,14 +185,24 @@ I'm your BASE Media Buying Bot. Here's what I can do:
 • `perf help` - See all commands
 
 Type any command to get started! 🚀"""
-        
+
         # Send response
-        if response_text:
-            print(f"DEBUG: Sending response: {response_text[:100]}...")
-            message_api_client.send_text_with_open_id(user_open_id, response_text)
-        
+        if response_text and user_open_id:
+            print(
+                f"DEBUG: Sending response to {user_open_id}: {response_text[:100]}..."
+            )
+            try:
+                message_api_client.send_text_with_open_id(
+                    user_open_id, response_text
+                )
+                print("DEBUG: Message sent successfully")
+            except Exception as e:
+                print(f"ERROR: Failed to send message: {e}")
+                import traceback
+                traceback.print_exc()
+
         return jsonify({"code": 0})
-    
+
     except Exception as e:
         print(f"ERROR: Exception in callback_event_handler: {e}")
         import traceback
@@ -182,31 +225,33 @@ def webhook_root():
 @app.route("/health", methods=["GET"])
 def health_check():
     """Health check endpoint"""
-    return jsonify({
-        "status": "ok",
-        "performance_scheduler": "disabled (testing)",
-        "user_performance_scheduler": "disabled (testing)"
-    })
+    return jsonify(
+        {
+            "status": "ok",
+            "performance_scheduler": "disabled (testing)",
+            "user_performance_scheduler": "disabled (testing)",
+        }
+    )
 
 
 if __name__ == "__main__":
     port = int(os.getenv("PORT", 5000))
     print(f"DEBUG: Starting server on 0.0.0.0:{port}")
-    print(f"DEBUG: Performance scheduler: disabled")
-    print(f"DEBUG: User performance scheduler: disabled")
-    
-    # Make sure Flask binds to the port immediately
+    print("DEBUG: Performance scheduler: disabled")
+    print("DEBUG: User performance scheduler: disabled")
+
     try:
         app.run(
             host="0.0.0.0",
             port=port,
             debug=False,
             use_reloader=False,
-            threaded=True
+            threaded=True,
         )
     except Exception as e:
         print(f"CRITICAL ERROR: Failed to start Flask server: {e}")
         import traceback
+
         traceback.print_exc()
         exit(1)
 
