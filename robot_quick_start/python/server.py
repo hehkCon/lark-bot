@@ -8,19 +8,24 @@ from performance_scheduler import initialize_performance_scheduler
 from user_performance_scheduler import initialize_user_performance_scheduler
 from performance_commands import PerformanceCommands
 from commission import calculate_commission
-from creative import CreativeTracker
+from creative_tracker import parse_creative_command, count_creatives_by_creator, count_creatives_by_language, get_creative_help
+
 
 # Load environment variables
 load_dotenv()
 
+
 # Initialize Flask app
 app = Flask(__name__)
+
 
 # Initialize API clients
 token_manager = TokenManager(
     app_id=os.getenv("LARK_APP_ID"),
-    app_secret=os.getenv("LARK_APP_SECRET")
+    app_secret=os.getenv("LARK_APP_SECRET"),
+    host="https://open.larksuite.com"
 )
+
 
 message_api_client = MessageApiClient(
     app_id=os.getenv("LARK_APP_ID"),
@@ -28,13 +33,6 @@ message_api_client = MessageApiClient(
     token_manager=token_manager
 )
 
-# Initialize creative tracker
-creative_tracker = CreativeTracker(
-    message_api_client=message_api_client,
-    token_manager=token_manager,
-    app_token=os.getenv("LARK_BASE_APP_TOKEN"),
-    table_id=os.getenv("LARK_BASE_CREATIVE_TABLE_ID")
-)
 
 # Initialize Performance Scheduler (sends team messages at 9:10 AM EST)
 performance_scheduler = None
@@ -50,6 +48,7 @@ try:
 except Exception as e:
     print(f"ERROR: Failed to initialize performance scheduler: {e}")
     performance_scheduler = None
+
 
 # Initialize User Performance Scheduler (sends individual messages at 9:50 AM EST)
 user_performance_scheduler = None
@@ -133,7 +132,30 @@ def callback_event_handler():
         # ========== CREATIVE TRACKER ==========
         elif text.lower().startswith("creative"):
             print("DEBUG: Detected creative tracker command")
-            response_text = creative_tracker.handle_command(text, user_open_id)
+            try:
+                command = parse_creative_command(text)
+                
+                if command and command.get("type") == "help":
+                    response_text = get_creative_help()
+                elif command and command.get("type") == "test":
+                    try:
+                        from meegle_api import MeegleClient
+                        client = MeegleClient()
+                        result = client.test_connection()
+                        response_text = "✅ Meegle connection successful!"
+                    except Exception as e:
+                        response_text = f"❌ Meegle connection failed: {str(e)}"
+                elif command and command.get("type") == "count":
+                    response_text = count_creatives_by_creator(command["creator"], command["time_period"], user_open_id)
+                elif command and command.get("type") == "language":
+                    response_text = count_creatives_by_language(command["language"], command["time_period"])
+                elif command and "error" in command:
+                    response_text = command["error"]
+                else:
+                    response_text = get_creative_help()
+            except Exception as e:
+                print(f"ERROR: Creative tracker error: {e}")
+                response_text = f"❌ Error in creative tracker: {str(e)}"
         
         # ========== UNKNOWN COMMAND ==========
         else:

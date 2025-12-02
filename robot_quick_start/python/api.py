@@ -3,8 +3,9 @@ import json
 import threading
 import time
 
+
 class TokenManager:
-    def __init__(self, app_id, app_secret, host):
+    def __init__(self, app_id, app_secret, host="https://open.larksuite.com"):
         self.app_id = app_id
         self.app_secret = app_secret
         self.host = host
@@ -52,9 +53,11 @@ class TokenManager:
 
 
 class MessageApiClient:
-    def __init__(self, app_id, app_secret, host):
-        self.token_manager = TokenManager(app_id, app_secret, host)
-        self.host = host
+    def __init__(self, app_id, app_secret, token_manager):
+        self.app_id = app_id
+        self.app_secret = app_secret
+        self.token_manager = token_manager
+        self.host = "https://open.larksuite.com"
 
     def send(self, receive_id_type, receive_id, msg_type, content):
         token = self.token_manager.get_token()
