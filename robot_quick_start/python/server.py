@@ -5,7 +5,7 @@ from flask import Flask, jsonify, request
 from api import MessageApiClient, TokenManager
 from lark_base_client import PerformanceTracker
 from performance_commands import PerformanceCommands
-from commission import calculate_commission
+from commission import calculate_commission, get_help_message
 from creative_tracker import parse_creative_command, count_creatives_by_creator, count_creatives_by_language, get_creative_help
 
 # Load environment variables
@@ -72,32 +72,26 @@ def callback_event_handler():
 
     # Message received event
     if event_type == "im.message.receive_v1":
-        # Extract message details directly from req_data
         event_data = req_data.get("event", {})
         message = event_data.get("message", {})
         message_type = message.get("message_type")
         print(f"DEBUG: Message type: {message_type}")
 
-        # Only handle text messages
         if message_type != "text":
             logging.info(f"Ignoring non-text message type: {message_type}")
             return jsonify({"message": "ignored"}), 200
 
-        # Parse message content
         content_str = message.get("content", "{}")
         content = json.loads(content_str)
         text = content.get("text", "").strip()
 
-        # Extract sender information
         sender = event_data.get("sender", {})
         sender_id = sender.get("sender_id", {})
         user_open_id = sender_id.get("open_id")
 
-        # Extract chat information (works for both 1-on-1 and group)
         chat_id = message.get("chat_id")
-        chat_type = message.get("chat_type")  # "p2p" (1-on-1) or "group"
+        chat_type = message.get("chat_type")
 
-        # Strip mention prefix from group chat messages
         if chat_type == "group" and text.startswith("@"):
             text = text.split(" ", 1)[1] if " " in text else ""
             print(f"DEBUG: Stripped mention prefix, cleaned text: {text}")
@@ -105,12 +99,26 @@ def callback_event_handler():
         logging.info(f"Received message from {user_open_id} in {chat_type} chat: {text}")
         print(f"DEBUG: Received message from {user_open_id} in {chat_type} chat (chat_id: {chat_id}): {text}")
 
-        # Initialize response_text as None
         response_text = None
+        text_lower = text.lower()
+
+        # Handle perf help explicitly
+        if text_lower == "perf help":
+            try:
+                performance_tracker = PerformanceTracker(
+                    app_token=LARK_BASE_APP_TOKEN,
+                    performance_table_id=LARK_BASE_PERFORMANCE_TABLE_ID,
+                    projections_table_id=LARK_BASE_PROJECTIONS_TABLE_ID,
+                    tenant_access_token=token_manager.get_token(),
+                    host=LARK_HOST
+                )
+                help_handler = PerformanceCommands(performance_tracker, performance_tracker.get_user_data())
+                response_text = help_handler._get_help_text()
+            except Exception as e:
+                response_text = f"❌ Error fetching help: {str(e)}"
 
         # Handle performance commands
-        if text.lower().startswith("perf"):
-            print("DEBUG: Detected performance command")
+        elif text_lower.startswith("perf"):
             try:
                 performance_tracker = PerformanceTracker(
                     app_token=LARK_BASE_APP_TOKEN,
@@ -120,22 +128,21 @@ def callback_event_handler():
                     host=LARK_HOST
                 )
                 user_data = performance_tracker.get_user_data()
-                performance_cmd_handler = PerformanceCommands(performance_tracker, user_data)
-                response_text = performance_cmd_handler.handle_performance_command(text, user_open_id)
+                performance_commands_handler = PerformanceCommands(performance_tracker, user_data)
+                response_text = performance_commands_handler.handle_performance_command(text, user_open_id)
             except Exception as e:
-                print(f"ERROR: Performance command error: {e}")
-                import traceback
-                traceback.print_exc()
                 response_text = f"❌ Error fetching performance data: {str(e)}"
+
+        # Handle commission help explicitly
+        elif text_lower == "commission help":
+            response_text = get_help_message()
 
         # Handle commission commands
         elif any(text.upper().startswith(platform) for platform in ["GINSU", "BING", "YAHOO", "RSOC"]):
-            print("DEBUG: Detected commission calculation command")
             response_text = calculate_commission(text, user_open_id)
 
         # Handle creative commands
-        elif text.lower().startswith("creative"):
-            print("DEBUG: Detected creative command")
+        elif text_lower.startswith("creative"):
             parsed = parse_creative_command(text)
             if parsed is None:
                 response_text = "❌ Invalid creative command. Type 'creative help' for usage."
@@ -172,7 +179,7 @@ def callback_event_handler():
             else:
                 response_text = "❌ Unknown creative command"
 
-        # Unknown command
+        # Unknown command fallback
         else:
             response_text = """👋 **Hello!**
 
@@ -194,7 +201,7 @@ I'm your BASE Media Buying Bot. Here's what I can do:
 
 Type any command to get started! 🚀"""
 
-        # Send the response
+        # Send response
         if response_text:
             try:
                 if chat_type == "group":
