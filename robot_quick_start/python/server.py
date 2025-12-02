@@ -173,6 +173,12 @@ def webhook_event():
     return callback_event_handler()
 
 
+@app.route("/", methods=["POST"])
+def webhook_root():
+    """Catch webhook at root path for backward compatibility"""
+    return callback_event_handler()
+
+
 @app.route("/health", methods=["GET"])
 def health_check():
     """Health check endpoint"""
