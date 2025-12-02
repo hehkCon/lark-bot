@@ -8,7 +8,7 @@ class PerformanceCommands:
         self.user_data = user_data
         self.team_mapping = {
             "amanda": "Amanda's Team",
-            "dioulde": "Dioulde's Team",
+            "dioulde": "Dioulde's Team", 
             "kath": "Kath's Team",
             "jello": "Jello's Team",
             "jonas": "Amanda's Team",
@@ -16,6 +16,14 @@ class PerformanceCommands:
             "angelika": "Kath's Team",
             "rachel": "Dioulde's Team",
             "job": "Jello's Team"
+        }
+        
+        # Manager email mapping for accurate team filtering
+        self.manager_emails = {
+            "amanda's team": ["amanda.g@intentt.com", "jonas.f@intentt.com", "brent.l@intentt.com"],
+            "dioulde's team": ["dioulde.n@intentt.com", "rachel.l@intentt.com"],
+            "kath's team": ["kath.g@intentt.com", "angelika.m@intentt.com"],
+            "jello's team": ["jello.c@intentt.com", "job.c@intentt.com"]
         }
 
     def _parse_date_range(self, text: str) -> tuple:
@@ -38,26 +46,28 @@ class PerformanceCommands:
         return start.strftime("%Y-%m-%d"), end.strftime("%Y-%m-%d")
 
     def _get_team_records(self, team_name: str, date_range: tuple) -> List[Dict]:
-        """Get performance records for specific team using team formula field"""
+        """Get performance records for specific team by campaign_manager emails"""
         all_records = self.performance_tracker.get_performance_records(date_range)
         team_records = []
         
+        # Get target manager emails for this team
+        target_emails = self.manager_emails.get(team_name.lower(), [])
+        
         for record in all_records:
             fields = record.get("fields", {})
-            # Handle both formula field structure and simple text
-            team_field = fields.get("team", {})
-            if isinstance(team_field, dict) and "value" in team_field:
-                team_text = team_field["value"][0].get("text", "") if team_field["value"] else ""
-            else:
-                team_text = str(team_field).lower()
+            # Handle campaign_manager field safely (it's a URL field)
+            campaign_manager_field = fields.get("campaign_manager", [{}])[0]
+            campaign_manager = campaign_manager_field.get("text", "").lower() if campaign_manager_field else ""
             
-            if team_name.lower() in team_text.lower():
+            # Match any of the team managers
+            if any(email in campaign_manager for email in target_emails):
                 team_records.append(record)
         
+        print(f"DEBUG: Found {len(team_records)} records for {team_name} (managers: {target_emails})")
         return team_records
 
     def _aggregate_performance(self, records: List[Dict]) -> Dict[str, Any]:
-        """Aggregate performance metrics from records"""
+        """Aggregate performance metrics from records - calculates ROI"""
         total_spend = 0
         total_revenue = 0
         total_profit = 0
@@ -66,7 +76,7 @@ class PerformanceCommands:
         for record in records:
             fields = record.get("fields", {})
             
-            # Handle number fields safely
+            # Handle number fields safely (some may be lists, some direct numbers)
             spend = float(fields.get("spend", 0) or 0)
             revenue = float(fields.get("revenue", 0) or 0)
             profit = float(fields.get("profit", 0) or 0)
@@ -76,29 +86,36 @@ class PerformanceCommands:
             total_profit += profit
             record_count += 1
         
+        # ROI = (Profit / Spend) * 100%
+        roi = (total_profit / total_spend * 100) if total_spend > 0 else 0
+        
         return {
             "records": record_count,
             "spend": total_spend,
             "revenue": total_revenue,
             "profit": total_profit,
-            "roas": total_revenue / total_spend if total_spend > 0 else 0
+            "roi": roi
         }
 
     def _format_performance_message(self, title: str, date_range: tuple, records: List[Dict]) -> str:
-        """Format performance message for display"""
+        """Format performance message as compact inline summary"""
         start_date, end_date = date_range
         
         if not records:
-            return f"📊 **{title} - {start_date} to {end_date}**\n\nNo performance data found for this period."
+            date_label = f"{start_date}" if start_date == end_date else f"{start_date} to {end_date}"
+            return f"📊 **{title} - {date_label}**: No performance data found."
         
         agg = self._aggregate_performance(records)
+        date_label = f"{start_date}" if start_date == end_date else f"{start_date} to {end_date}"
         
-        message = f"📊 **{title} - {start_date} to {end_date}**\n\n"
-        message += f"**Records:** {agg['records']}\n"
-        message += f"**Spend:** ${agg['spend']:,.0f}\n"
-        message += f"**Revenue:** ${agg['revenue']:,.0f}\n"
-        message += f"**Profit:** ${agg['profit']:,.0f}\n"
-        message += f"**ROAS:** {agg['roas']:.2f}x\n"
+        message = (
+            f"📊 **{title} - {date_label}**: "
+            f"{agg['records']} records, "
+            f"${agg['spend']:,.0f} spend, "
+            f"${agg['revenue']:,.0f} revenue, "
+            f"${agg['profit']:,.0f} profit, "
+            f"ROI {agg['roi']:.1f}%"
+        )
         
         return message
 
@@ -124,7 +141,6 @@ class PerformanceCommands:
         
         # Personal performance ("perf me")
         elif command_type == "me":
-            # Simple fallback for now
             records = self.performance_tracker.get_performance_records(date_range)
             return self._format_performance_message("Your Performance", date_range, records)
         
@@ -137,27 +153,16 @@ class PerformanceCommands:
 
     def _get_help_text(self) -> str:
         """Help text for performance commands"""
-        return """📊 **Performance Command Help**
+        return """📊 **Performance Commands**
 
-**View Your Performance:**
-• `perf me` - Today
-• `perf me yesterday` - Yesterday only
-• `perf me last 7` - Last 7 days
-• `perf me mtd` - Month to date
+**Your Performance:** `perf me [period]`
+**All Teams:** `perf team [period]`
+**Specific Teams:** `perf amanda/kath/dioulde/jello [period]`
 
-**View All Teams:**
-• `perf team` - Today
-• `perf team yesterday` - Yesterday only
-• `perf team last 7` - Last 7 days
-• `perf team mtd` - Month to date
-
-**View Specific Team:**
-• `perf amanda` - Amanda's Team today
-• `perf amanda yesterday` - Yesterday only
-• `perf dioulde`, `perf kath`, `perf jello`
+**Periods:** (default=today) yesterday | last 7 | mtd
 
 **Examples:**
-perf me
-perf team last 7
-perf amanda mtd"""
+• `perf amanda yesterday`
+• `perf team last 7`
+• `perf kath mtd`"""
 
