@@ -69,7 +69,7 @@ class PerformanceTracker:
         for record in records:
             fields = record.get("fields", {})
             
-            # ✅ Match your actual table field names
+            # Match your actual table field names
             name = fields.get("Text", [{}])[0].get("text", "").strip() or "Unknown"
             email_field = fields.get("email", [{}])[0]
             email = email_field.get("text", "").strip() if email_field else ""
@@ -92,14 +92,18 @@ class PerformanceTracker:
         start_date, end_date = date_range
         print(f"DEBUG: Fetching performance records for {start_date} to {end_date}")
         
+        # Convert dates to milliseconds for comparison
+        start_ms = int(datetime.strptime(start_date, "%Y-%m-%d").timestamp() * 1000)
+        end_ms = int(datetime.strptime(end_date, "%Y-%m-%d").timestamp() * 1000) + 86399999  # End of day
+        
         records = self._search_records(self.performance_table_id, page_size=500)
         filtered_records = []
         
         for record in records:
             fields = record.get("fields", {})
-            record_date = fields.get("Date", [{}])[0].get("date", "")
+            record_date_ms = fields.get("date", [0])[0]
             
-            if record_date and start_date <= record_date <= end_date:
+            if start_ms <= record_date_ms <= end_ms:
                 filtered_records.append(record)
         
         print(f"DEBUG: Filtered to {len(filtered_records)} performance records in date range")
