@@ -4,8 +4,6 @@ from dotenv import load_dotenv
 import json
 from api import MessageApiClient, TokenManager
 from lark_base_client import PerformanceTracker
-from performance_scheduler import initialize_performance_scheduler
-from user_performance_scheduler import initialize_user_performance_scheduler
 from performance_commands import PerformanceCommands
 from commission import calculate_commission
 from creative_tracker import parse_creative_command, count_creatives_by_creator, count_creatives_by_language, get_creative_help
@@ -34,36 +32,12 @@ message_api_client = MessageApiClient(
 )
 
 
-# Initialize Performance Scheduler (sends team messages at 9:10 AM EST)
+# Performance schedulers disabled for debugging
 performance_scheduler = None
-try:
-    performance_scheduler = initialize_performance_scheduler(
-        message_api_client=message_api_client,
-        token_manager=token_manager,
-        app_token=os.getenv("LARK_BASE_APP_TOKEN"),
-        performance_table_id=os.getenv("LARK_BASE_PERFORMANCE_TABLE_ID"),
-        projections_table_id=os.getenv("LARK_BASE_PROJECTIONS_TABLE_ID")
-    )
-    print("DEBUG: Performance scheduler initialized successfully")
-except Exception as e:
-    print(f"ERROR: Failed to initialize performance scheduler: {e}")
-    performance_scheduler = None
+print("DEBUG: Performance scheduler disabled for testing")
 
-
-# Initialize User Performance Scheduler (sends individual messages at 9:50 AM EST)
 user_performance_scheduler = None
-try:
-    user_performance_scheduler = initialize_user_performance_scheduler(
-        message_api_client=message_api_client,
-        token_manager=token_manager,
-        app_token=os.getenv("LARK_BASE_APP_TOKEN"),
-        performance_table_id=os.getenv("LARK_BASE_PERFORMANCE_TABLE_ID"),
-        lark_user_id_table_id=os.getenv("LARK_BASE_USER_INFO_TABLE_ID")
-    )
-    print("DEBUG: User performance scheduler initialized successfully")
-except Exception as e:
-    print(f"ERROR: Failed to initialize user performance scheduler: {e}")
-    user_performance_scheduler = None
+print("DEBUG: User performance scheduler disabled for testing")
 
 
 def callback_event_handler():
@@ -204,16 +178,16 @@ def health_check():
     """Health check endpoint"""
     return jsonify({
         "status": "ok",
-        "performance_scheduler": "running" if performance_scheduler and performance_scheduler.running else "not running",
-        "user_performance_scheduler": "running" if user_performance_scheduler and user_performance_scheduler.running else "not running"
+        "performance_scheduler": "disabled (testing)",
+        "user_performance_scheduler": "disabled (testing)"
     })
 
 
 if __name__ == "__main__":
     port = int(os.getenv("PORT", 5000))
     print(f"DEBUG: Starting server on 0.0.0.0:{port}")
-    print(f"DEBUG: Performance scheduler running: {performance_scheduler is not None}")
-    print(f"DEBUG: User performance scheduler running: {user_performance_scheduler is not None}")
+    print(f"DEBUG: Performance scheduler: disabled")
+    print(f"DEBUG: User performance scheduler: disabled")
     
     # Make sure Flask binds to the port immediately
     try:
