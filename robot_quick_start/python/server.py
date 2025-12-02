@@ -19,15 +19,15 @@ app = Flask(__name__)
 
 # Initialize API clients
 token_manager = TokenManager(
-    app_id=os.getenv("LARK_APP_ID"),
-    app_secret=os.getenv("LARK_APP_SECRET"),
-    host="https://open.larksuite.com"
+    app_id=os.getenv("APP_ID"),
+    app_secret=os.getenv("APP_SECRET"),
+    host=os.getenv("LARK_HOST", "https://open.larksuite.com")
 )
 
 
 message_api_client = MessageApiClient(
-    app_id=os.getenv("LARK_APP_ID"),
-    app_secret=os.getenv("LARK_APP_SECRET"),
+    app_id=os.getenv("APP_ID"),
+    app_secret=os.getenv("APP_SECRET"),
     token_manager=token_manager
 )
 
@@ -86,9 +86,9 @@ def callback_event_handler():
                 temp_tracker = PerformanceTracker(
                     app_token=os.getenv("LARK_BASE_APP_TOKEN"),
                     performance_table_id=os.getenv("LARK_BASE_PERFORMANCE_TABLE_ID"),
-                    projections_table_id=os.getenv("LARK_BASE_USER_INFO_TABLE_ID"),
+                    projections_table_id=os.getenv("LARK_BASE_PROJECTIONS_TABLE_ID"),
                     tenant_access_token=token_manager.get_token(),
-                    host="https://open.larksuite.com"
+                    host=os.getenv("LARK_HOST", "https://open.larksuite.com")
                 )
                 user_data = temp_tracker.get_user_data()
                 performance_commands_handler = PerformanceCommands(temp_tracker, user_data)
