@@ -91,21 +91,21 @@ class PerformanceTracker:
         """Get performance records for date range using Search API"""
         start_date, end_date = date_range
         print(f"DEBUG: Fetching performance records for {start_date} to {end_date}")
-        
+
         # Convert dates to milliseconds for comparison
         start_ms = int(datetime.strptime(start_date, "%Y-%m-%d").timestamp() * 1000)
         end_ms = int(datetime.strptime(end_date, "%Y-%m-%d").timestamp() * 1000) + 86399999  # End of day
         
         records = self._search_records(self.performance_table_id, page_size=500)
         filtered_records = []
-        
+
         for record in records:
             fields = record.get("fields", {})
-            record_date_ms = fields.get("date", [0])[0]
-            
-            if start_ms <= record_date_ms <= end_ms:
+            record_date_ms = fields.get("date", 0)
+
+            if record_date_ms and start_ms <= record_date_ms <= end_ms:
                 filtered_records.append(record)
-        
+
         print(f"DEBUG: Filtered to {len(filtered_records)} performance records in date range")
         return filtered_records
 

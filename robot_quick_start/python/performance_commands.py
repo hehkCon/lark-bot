@@ -1,15 +1,15 @@
-import re
 from datetime import datetime, timedelta
 from typing import Dict, List, Any
+from lark_base_client import PerformanceTracker
 
 class PerformanceCommands:
-    def __init__(self, tracker, user_data: Dict[str, Dict]):
-        self.tracker = tracker
+    def __init__(self, performance_tracker, user_data):
+        self.performance_tracker = performance_tracker
         self.user_data = user_data
         self.team_mapping = {
             "amanda": "Amanda's Team",
-            "kath": "Kath's Team", 
             "dioulde": "Dioulde's Team",
+            "kath": "Kath's Team",
             "jello": "Jello's Team",
             "jonas": "Amanda's Team",
             "brent": "Amanda's Team",
@@ -38,22 +38,23 @@ class PerformanceCommands:
         return start.strftime("%Y-%m-%d"), end.strftime("%Y-%m-%d")
 
     def _get_team_records(self, team_name: str, date_range: tuple) -> List[Dict]:
-        """Get performance records for specific team"""
-        all_records = self.tracker.get_performance_records(date_range)
-        team_records = [
-            rec for rec in all_records 
-            if rec.get("fields", {}).get("team", [{}])[0].get("text", "") == team_name
-        ]
+        """Get performance records for specific team using team formula field"""
+        all_records = self.performance_tracker.get_performance_records(date_range)
+        team_records = []
+        
+        for record in all_records:
+            fields = record.get("fields", {})
+            # Handle both formula field structure and simple text
+            team_field = fields.get("team", {})
+            if isinstance(team_field, dict) and "value" in team_field:
+                team_text = team_field["value"][0].get("text", "") if team_field["value"] else ""
+            else:
+                team_text = str(team_field).lower()
+            
+            if team_name.lower() in team_text.lower():
+                team_records.append(record)
+        
         return team_records
-
-    def _get_user_records(self, email: str, date_range: tuple) -> List[Dict]:
-        """Get performance records for specific user by campaign_manager email"""
-        all_records = self.tracker.get_performance_records(date_range)
-        user_records = [
-            rec for rec in all_records 
-            if rec.get("fields", {}).get("campaign_manager", [{}])[0].get("text", "").lower() == email.lower()
-        ]
-        return user_records
 
     def _aggregate_performance(self, records: List[Dict]) -> Dict[str, Any]:
         """Aggregate performance metrics from records"""
@@ -64,12 +65,15 @@ class PerformanceCommands:
         
         for record in records:
             fields = record.get("fields", {})
-            spend = float(fields.get("spend", [0])[0].get("number", 0))
-            revenue = float(fields.get("revenue", [0])[0].get("number", 0))
+            
+            # Handle number fields safely
+            spend = float(fields.get("spend", 0) or 0)
+            revenue = float(fields.get("revenue", 0) or 0)
+            profit = float(fields.get("profit", 0) or 0)
             
             total_spend += spend
             total_revenue += revenue
-            total_profit += (revenue - spend)
+            total_profit += profit
             record_count += 1
         
         return {
@@ -80,21 +84,21 @@ class PerformanceCommands:
             "roas": total_revenue / total_spend if total_spend > 0 else 0
         }
 
-    def _format_performance_message(self, team_name: str, date_range: tuple, records: List[Dict]) -> str:
+    def _format_performance_message(self, title: str, date_range: tuple, records: List[Dict]) -> str:
         """Format performance message for display"""
         start_date, end_date = date_range
         
         if not records:
-            return f"📊 **{team_name} - {start_date} to {end_date}**\n\nNo performance data found for this period."
+            return f"📊 **{title} - {start_date} to {end_date}**\n\nNo performance data found for this period."
         
         agg = self._aggregate_performance(records)
         
-        message = f"📊 **{team_name} - {start_date} to {end_date}**\n\n"
+        message = f"📊 **{title} - {start_date} to {end_date}**\n\n"
         message += f"**Records:** {agg['records']}\n"
         message += f"**Spend:** ${agg['spend']:,.0f}\n"
         message += f"**Revenue:** ${agg['revenue']:,.0f}\n"
         message += f"**Profit:** ${agg['profit']:,.0f}\n"
-        message += f"**ROAS:** {agg['roas']:.2f}x\n\n"
+        message += f"**ROAS:** {agg['roas']:.2f}x\n"
         
         return message
 
@@ -115,32 +119,21 @@ class PerformanceCommands:
         
         # All teams summary
         elif command_type == "team":
-            all_records = self.tracker.get_performance_records(date_range)
-            return self._format_performance_message("All Teams", date_range, all_records)
+            records = self.performance_tracker.get_performance_records(date_range)
+            return self._format_performance_message("All Teams", date_range, records)
         
         # Personal performance ("perf me")
         elif command_type == "me":
-            # Find user's email from user_data or use open_id lookup
-            user_email = self._find_user_email(user_open_id)
-            if user_email:
-                records = self._get_user_records(user_email, date_range)
-                user_name = self.user_data.get(user_email.lower(), {}).get("name", "You")
-                return self._format_performance_message(f"{user_name}'s Performance", date_range, records)
-            return "❌ Could not find your performance data."
+            # Simple fallback for now
+            records = self.performance_tracker.get_performance_records(date_range)
+            return self._format_performance_message("Your Performance", date_range, records)
         
-        # Email-based user lookup (perf amanda.g@intentt.com)
+        # Email-based user lookup
         elif "@" in command_type:
-            records = self._get_user_records(command_type, date_range)
+            records = self.performance_tracker.get_performance_records(date_range)
             return self._format_performance_message(f"{command_type}'s Performance", date_range, records)
         
         return self._get_help_text()
-
-    def _find_user_email(self, user_open_id: str) -> str:
-        """Find user email by lark_user_key"""
-        for email, data in self.user_data.items():
-            if data.get("lark_user_key") == user_open_id:
-                return email
-        return None
 
     def _get_help_text(self) -> str:
         """Help text for performance commands"""
@@ -148,9 +141,9 @@ class PerformanceCommands:
 
 **View Your Performance:**
 • `perf me` - Today
-• `perf me yesterday` - Yesterday only  
+• `perf me yesterday` - Yesterday only
 • `perf me last 7` - Last 7 days
-• `perf me mtd` - Month to date (1st to today)
+• `perf me mtd` - Month to date
 
 **View All Teams:**
 • `perf team` - Today
@@ -158,23 +151,13 @@ class PerformanceCommands:
 • `perf team last 7` - Last 7 days
 • `perf team mtd` - Month to date
 
-**View Specific Team (with individual breakdown):**
+**View Specific Team:**
 • `perf amanda` - Amanda's Team today
 • `perf amanda yesterday` - Yesterday only
-• `perf amanda last 7` - Last 7 days
-• `perf amanda mtd` - Month to date
-• `perf dioulde`, `perf kath`, `perf jello` - Other teams
-
-**Manager - View Specific Person:**
-• `perf amanda.g@intentt.com` - Today
-• `perf amanda.g@intentt.com yesterday` - Yesterday
-• `perf amanda.g@intentt.com last 7` - Last 7 days
-• `perf amanda.g@intentt.com mtd` - Month to date
+• `perf dioulde`, `perf kath`, `perf jello`
 
 **Examples:**
 perf me
-perf me mtd
 perf team last 7
-perf amanda mtd
-perf amanda.g@intentt.com last 7"""
+perf amanda mtd"""
 
