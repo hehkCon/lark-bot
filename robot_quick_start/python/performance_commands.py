@@ -1,308 +1,154 @@
+import re
 from datetime import datetime, timedelta
-from lark_base_client import PerformanceTracker
+from typing import Dict, List, Any
 
 class PerformanceCommands:
-    def __init__(self, performance_tracker, user_data):
-        """
-        Initialize performance commands handler
-        
-        Args:
-            performance_tracker: PerformanceTracker instance
-            user_data: Dict of user email -> user info
-        """
-        self.performance_tracker = performance_tracker
+    def __init__(self, tracker, user_data: Dict[str, Dict]):
+        self.tracker = tracker
         self.user_data = user_data
-    
-    def get_team_mapping(self):
-        """
-        Return team structure mapping
-        """
-        return {
-            "Amanda's Team": ["amanda.g@intentt.com", "jonas.f@intentt.com", "brent.l@intentt.com"],
-            "Dioulde's Team": ["dioulde.n@intentt.com", "rachel.l@intentt.com"],
-            "Kath's Team": ["kath.g@intentt.com", "angelika.m@intentt.com"],
-            "Jello's Team": ["jello.c@intentt.com", "job.c@intentt.com"]
+        self.team_mapping = {
+            "amanda": "Amanda's Team",
+            "kath": "Kath's Team", 
+            "dioulde": "Dioulde's Team",
+            "jello": "Jello's Team",
+            "jonas": "Amanda's Team",
+            "brent": "Amanda's Team",
+            "angelika": "Kath's Team",
+            "rachel": "Dioulde's Team",
+            "job": "Jello's Team"
         }
-    
-    def handle_performance_command(self, text, user_email):
-        """
-        Handle performance-related commands with date range support
-        """
-        
-        if not text.lower().startswith("perf"):
-            return None
-        
-        # Parse command
-        parts = text.lower().split()
-        if len(parts) < 2:
-            return self._get_help_text()
-        
-        # Extract date range and target
-        target_dates = [datetime.now().strftime("%Y-%m-%d")]  # Default: today
-        target = None
-        skip_indices = set()
-        
-        # First pass: identify date ranges
-        for i, part in enumerate(parts[1:], 1):
-            if part == "yesterday":
-                target_dates = [(datetime.now() - timedelta(days=1)).strftime("%Y-%m-%d")]
-                skip_indices.add(i)
-            elif part == "today":
-                target_dates = [datetime.now().strftime("%Y-%m-%d")]
-                skip_indices.add(i)
-            elif part == "last" and i + 1 < len(parts) and parts[i + 1] == "7":
-                # Last 7 days
-                target_dates = [(datetime.now() - timedelta(days=j)).strftime("%Y-%m-%d") for j in range(7)]
-                target_dates.reverse()
-                skip_indices.add(i)
-                skip_indices.add(i + 1)
-            elif part == "mtd" or part == "month":
-                # Month to date (1st of current month to today)
-                today = datetime.now()
-                first_of_month = today.replace(day=1)
-                target_dates = [(first_of_month + timedelta(days=j)).strftime("%Y-%m-%d") 
-                               for j in range((today - first_of_month).days + 1)]
-                skip_indices.add(i)
-        
-        # Second pass: get target (skip date-related indices)
-        for i, part in enumerate(parts[1:], 1):
-            if i not in skip_indices:
-                target = part
-                break
-        
-        # Route to appropriate handler
-        if target == "team":
-            return self._get_all_teams_performance(target_dates)
-        elif target == "me":
-            return self._get_user_performance(user_email, target_dates)
-        elif target and target in ["amanda's", "dioulde's", "kath's", "jello's"]:
-            team_name = f"{target} team"
-            return self._get_single_team_performance(team_name, target_dates)
-        elif target and "@" in target:
-            return self._get_user_performance(target, target_dates)
-        elif target:
-            # Try to match team name
-            team_mapping = self.get_team_mapping()
-            for team_name in team_mapping.keys():
-                if target.lower() in team_name.lower():
-                    return self._get_single_team_performance(team_name, target_dates)
-            return f"❌ Unknown command: '{target}'. Type 'perf help' for available commands."
-        else:
-            return self._get_help_text()
 
-    def _get_all_teams_performance(self, target_dates):
-        """Get performance grouped by team for date range"""
+    def _parse_date_range(self, text: str) -> tuple:
+        """Parse date range from command text"""
+        text_lower = text.lower()
+        today = datetime.now().date()
         
-        if len(target_dates) == 1:
-            date_label = target_dates[0]
+        if "yesterday" in text_lower:
+            start = today - timedelta(days=1)
+            end = start
+        elif "last 7" in text_lower or "last7" in text_lower:
+            start = today - timedelta(days=6)
+            end = today
+        elif "mtd" in text_lower:
+            start = today.replace(day=1)
+            end = today
         else:
-            date_label = f"{target_dates[0]} to {target_dates[-1]}"
+            start = end = today
         
-        team_mapping = self.get_team_mapping()
-        
-        message = f"""📊 **Team Performance - {date_label}**
+        return start.strftime("%Y-%m-%d"), end.strftime("%Y-%m-%d")
 
-"""
-        
+    def _get_team_records(self, team_name: str, date_range: tuple) -> List[Dict]:
+        """Get performance records for specific team"""
+        all_records = self.tracker.get_performance_records(date_range)
+        team_records = [
+            rec for rec in all_records 
+            if rec.get("fields", {}).get("team", [{}])[0].get("text", "") == team_name
+        ]
+        return team_records
+
+    def _get_user_records(self, email: str, date_range: tuple) -> List[Dict]:
+        """Get performance records for specific user by campaign_manager email"""
+        all_records = self.tracker.get_performance_records(date_range)
+        user_records = [
+            rec for rec in all_records 
+            if rec.get("fields", {}).get("campaign_manager", [{}])[0].get("text", "").lower() == email.lower()
+        ]
+        return user_records
+
+    def _aggregate_performance(self, records: List[Dict]) -> Dict[str, Any]:
+        """Aggregate performance metrics from records"""
+        total_spend = 0
         total_revenue = 0
         total_profit = 0
-        total_count = 0
+        record_count = 0
         
-        for team_name, team_emails in team_mapping.items():
-            team_revenue = 0
-            team_profit = 0
-            team_count = 0
+        for record in records:
+            fields = record.get("fields", {})
+            spend = float(fields.get("spend", [0])[0].get("number", 0))
+            revenue = float(fields.get("revenue", [0])[0].get("number", 0))
             
-            for email in team_emails:
-                revenue_total = 0
-                profit_total = 0
-                
-                for target_date in target_dates:
-                    user_performance = self.performance_tracker.get_user_performance(email, target_date)
-                    if user_performance:
-                        revenue_total += user_performance.get("revenue", 0)
-                        profit_total += user_performance.get("profit", 0)
-                
-                if revenue_total > 0 or profit_total > 0:
-                    team_revenue += revenue_total
-                    team_profit += profit_total
-                    team_count += 1
-                    total_revenue += revenue_total
-                    total_profit += profit_total
-                    total_count += 1
-            
-            if team_count > 0:
-                # Get daily target and multiply by number of days
-                user_targets = self.performance_tracker.get_daily_user_target(target_dates[0], num_media_buyers=9)
-                daily_profit_target = user_targets.get("profit_target", 0) if user_targets else 0
-                
-                profit_target = daily_profit_target * team_count * len(target_dates)
-                profit_pct = (team_profit / profit_target * 100) if profit_target > 0 else 0
-                
-                status = "✅" if profit_pct >= 100 else "⚠️" if profit_pct >= 80 else "❌"
-                
-                message += f"{status} **{team_name}** ({team_count} people): ${team_revenue:,.0f} rev / ${team_profit:,.0f} profit ({profit_pct:.0f}% of target)\n"
+            total_spend += spend
+            total_revenue += revenue
+            total_profit += (revenue - spend)
+            record_count += 1
         
-        if total_count > 0:
-            message += f"\n💰 **All Teams Total:**\n"
-            message += f"• Total Revenue: ${total_revenue:,.0f}\n"
-            message += f"• Total Profit: ${total_profit:,.0f}\n"
-            message += f"• Total Members: {total_count}\n"
-            message += f"• Period: {len(target_dates)} day(s)"
-        else:
-            message = f"❌ No performance data for the selected period"
+        return {
+            "records": record_count,
+            "spend": total_spend,
+            "revenue": total_revenue,
+            "profit": total_profit,
+            "roas": total_revenue / total_spend if total_spend > 0 else 0
+        }
+
+    def _format_performance_message(self, team_name: str, date_range: tuple, records: List[Dict]) -> str:
+        """Format performance message for display"""
+        start_date, end_date = date_range
+        
+        if not records:
+            return f"📊 **{team_name} - {start_date} to {end_date}**\n\nNo performance data found for this period."
+        
+        agg = self._aggregate_performance(records)
+        
+        message = f"📊 **{team_name} - {start_date} to {end_date}**\n\n"
+        message += f"**Records:** {agg['records']}\n"
+        message += f"**Spend:** ${agg['spend']:,.0f}\n"
+        message += f"**Revenue:** ${agg['revenue']:,.0f}\n"
+        message += f"**Profit:** ${agg['profit']:,.0f}\n"
+        message += f"**ROAS:** {agg['roas']:.2f}x\n\n"
         
         return message
 
-    def _get_single_team_performance(self, team_name, target_dates):
-        """Get performance for a specific team with individual member breakdown"""
+    def handle_performance_command(self, text: str, user_open_id: str) -> str:
+        """Main command handler"""
+        text_parts = text.lower().strip().split()
+        if len(text_parts) < 2:
+            return self._get_help_text()
         
-        if len(target_dates) == 1:
-            date_label = target_dates[0]
-        else:
-            date_label = f"{target_dates[0]} to {target_dates[-1]}"
+        command_type = text_parts[1]
+        date_range = self._parse_date_range(text)
         
-        team_mapping = self.get_team_mapping()
+        # Team queries (perf team, perf amanda, etc.)
+        if command_type in self.team_mapping:
+            team_name = self.team_mapping[command_type]
+            records = self._get_team_records(team_name, date_range)
+            return self._format_performance_message(team_name, date_range, records)
         
-        if team_name not in team_mapping:
-            return f"❌ Team '{team_name}' not found"
+        # All teams summary
+        elif command_type == "team":
+            all_records = self.tracker.get_performance_records(date_range)
+            return self._format_performance_message("All Teams", date_range, all_records)
         
-        team_emails = team_mapping[team_name]
+        # Personal performance ("perf me")
+        elif command_type == "me":
+            # Find user's email from user_data or use open_id lookup
+            user_email = self._find_user_email(user_open_id)
+            if user_email:
+                records = self._get_user_records(user_email, date_range)
+                user_name = self.user_data.get(user_email.lower(), {}).get("name", "You")
+                return self._format_performance_message(f"{user_name}'s Performance", date_range, records)
+            return "❌ Could not find your performance data."
         
-        message = f"""📊 **{team_name} - {date_label}**
+        # Email-based user lookup (perf amanda.g@intentt.com)
+        elif "@" in command_type:
+            records = self._get_user_records(command_type, date_range)
+            return self._format_performance_message(f"{command_type}'s Performance", date_range, records)
+        
+        return self._get_help_text()
 
-"""
-        
-        team_revenue = 0
-        team_profit = 0
-        team_count = 0
-        
-        for email in team_emails:
-            user_info = self.user_data.get(email)
-            if not user_info:
-                continue
-            
-            user_name = user_info.get("name", "")
-            
-            revenue_total = 0
-            profit_total = 0
-            roi_total = 0
-            days_with_data = 0
-            
-            for target_date in target_dates:
-                user_performance = self.performance_tracker.get_user_performance(email, target_date)
-                
-                if user_performance:
-                    revenue_total += user_performance.get("revenue", 0)
-                    profit_total += user_performance.get("profit", 0)
-                    roi_total += user_performance.get("roi", 0)
-                    days_with_data += 1
-            
-            if days_with_data > 0:
-                team_revenue += revenue_total
-                team_profit += profit_total
-                team_count += 1
-                
-                # Get daily target
-                user_targets = self.performance_tracker.get_daily_user_target(target_dates[0], num_media_buyers=9)
-                daily_profit_target = user_targets.get("profit_target", 0) if user_targets else 0
-                
-                profit_target = daily_profit_target * len(target_dates)
-                profit_pct = (profit_total / profit_target * 100) if profit_target > 0 else 0
-                avg_roi = roi_total / days_with_data
-                
-                status = "✅" if profit_pct >= 100 else "⚠️" if profit_pct >= 80 else "❌"
-                
-                message += f"{status} {user_name}: ${revenue_total:,.0f} rev / ${profit_total:,.0f} profit ({profit_pct:.0f}%) | Avg ROI: {avg_roi:.1f}%\n"
-            else:
-                message += f"❌ {user_name}: No data\n"
-        
-        if team_count > 0:
-            user_targets = self.performance_tracker.get_daily_user_target(target_dates[0], num_media_buyers=9)
-            daily_profit_target = user_targets.get("profit_target", 0) if user_targets else 0
-            team_target = daily_profit_target * team_count * len(target_dates)
-            team_profit_pct = (team_profit / team_target * 100) if team_target > 0 else 0
-            
-            message += f"\n💰 **{team_name} Total:**\n"
-            message += f"• Revenue: ${team_revenue:,.0f}\n"
-            message += f"• Profit: ${team_profit:,.0f} ({team_profit_pct:.0f}% of target)\n"
-            message += f"• Members: {team_count}\n"
-            message += f"• Period: {len(target_dates)} day(s)"
-        
-        return message
+    def _find_user_email(self, user_open_id: str) -> str:
+        """Find user email by lark_user_key"""
+        for email, data in self.user_data.items():
+            if data.get("lark_user_key") == user_open_id:
+                return email
+        return None
 
-    def _get_user_performance(self, email, target_dates):
-        """Get performance for a specific user across date range"""
-        
-        if len(target_dates) == 1:
-            date_label = target_dates[0]
-        else:
-            date_label = f"{target_dates[0]} to {target_dates[-1]}"
-        
-        # Find user in user_data
-        user_info = None
-        lookup_email = email
-        
-        if email in self.user_data:
-            user_info = self.user_data[email]
-        else:
-            # Try to find by partial match
-            for e, info in self.user_data.items():
-                if email.lower() in e.lower() or e.lower() in email.lower():
-                    user_info = info
-                    lookup_email = e
-                    break
-        
-        if not user_info:
-            return f"❌ User '{email}' not found in system"
-        
-        user_name = user_info.get("name", "")
-        
-        revenue_total = 0
-        profit_total = 0
-        roi_total = 0
-        days_with_data = 0
-        
-        for target_date in target_dates:
-            user_performance = self.performance_tracker.get_user_performance(lookup_email, target_date)
-            
-            if user_performance:
-                revenue_total += user_performance.get("revenue", 0)
-                profit_total += user_performance.get("profit", 0)
-                roi_total += user_performance.get("roi", 0)
-                days_with_data += 1
-        
-        if days_with_data == 0:
-            return f"❌ No performance data for {user_name} in selected period"
-        
-        # Get daily target
-        user_targets = self.performance_tracker.get_daily_user_target(target_dates[0], num_media_buyers=9)
-        daily_revenue_target = user_targets.get("revenue_target", 0) if user_targets else 0
-        daily_profit_target = user_targets.get("profit_target", 0) if user_targets else 0
-        
-        revenue_target = daily_revenue_target * len(target_dates)
-        profit_target = daily_profit_target * len(target_dates)
-        
-        revenue_pct = (revenue_total / revenue_target * 100) if revenue_target > 0 else 0
-        profit_pct = (profit_total / profit_target * 100) if profit_target > 0 else 0
-        avg_roi = (roi_total / days_with_data) if days_with_data > 0 else 0
-        
-        message = f"""📊 **{user_name}'s Performance - {date_label}**
-
-• Revenue: ${revenue_total:,.0f} / ${revenue_target:,.0f} ({revenue_pct:.0f}%)
-• Profit: ${profit_total:,.0f} / ${profit_target:,.0f} ({profit_pct:.0f}% of target)
-• Avg ROI: {avg_roi:.1f}%
-• Days with data: {days_with_data}"""
-        
-        return message
-
-    def _get_help_text(self):
-        """Return help text for performance commands"""
+    def _get_help_text(self) -> str:
+        """Help text for performance commands"""
         return """📊 **Performance Command Help**
 
 **View Your Performance:**
 • `perf me` - Today
-• `perf me yesterday` - Yesterday only
+• `perf me yesterday` - Yesterday only  
 • `perf me last 7` - Last 7 days
 • `perf me mtd` - Month to date (1st to today)
 

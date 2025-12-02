@@ -68,9 +68,12 @@ class PerformanceTracker:
         user_data = {}
         for record in records:
             fields = record.get("fields", {})
-            name = fields.get("Name", [{}])[0].get("name", "").strip() or "Unknown"
-            email = fields.get("Email", [{}])[0].get("text", "").strip()
-            team = fields.get("Team", [{}])[0].get("name", "").strip()
+            
+            # ✅ Match your actual table field names
+            name = fields.get("Text", [{}])[0].get("text", "").strip() or "Unknown"
+            email_field = fields.get("email", [{}])[0]
+            email = email_field.get("text", "").strip() if email_field else ""
+            team = fields.get("department", [{}])[0].get("text", "").strip()
             
             if name and email:
                 user_data[email.lower()] = {
@@ -78,8 +81,10 @@ class PerformanceTracker:
                     "email": email,
                     "team": team
                 }
+                print(f"DEBUG: Added user: {name} ({email}) -> {team}")
         
         print(f"DEBUG: Fetched user data for {len(user_data)} users")
+        print(f"DEBUG: User keys: {list(user_data.keys())}")
         return user_data
 
     def get_performance_records(self, date_range: tuple) -> List[Dict]:
