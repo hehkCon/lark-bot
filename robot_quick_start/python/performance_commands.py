@@ -13,6 +13,8 @@ class PerformanceCommands:
         """
         self.performance_tracker = performance_tracker
         self.user_data = user_data
+        self._latest_date_cache = None  # Cache latest date
+        self._perf_cache = {}  # Cache all performance records by date range
     
     def get_team_mapping(self):
         """
@@ -23,6 +25,140 @@ class PerformanceCommands:
             "Dioulde's Team": ["dioulde.n@intentt.com", "rachel.l@intentt.com"],
             "Kath's Team": ["kath.g@intentt.com", "angelika.m@intentt.com", "job.c@intentt.com"],
             "Jello's Team": ["jello.c@intentt.com"]
+        }
+    
+    def _get_latest_available_date_cached(self):
+        """
+        ✅ CACHED: Query Lark Base ONCE to find the latest available date
+        """
+        if self._latest_date_cache:
+            print(f"DEBUG: Using cached latest date: {self._latest_date_cache}")
+            return self._latest_date_cache
+        
+        print("DEBUG: Finding latest available data date (first time)...")
+        
+        # Try yesterday first (most common case)
+        for days_back in range(1, 31):
+            check_date = (datetime.now() - timedelta(days=days_back)).strftime("%Y-%m-%d")
+            records = self.performance_tracker.client.get_performance_records(check_date, check_date)
+            
+            if len(records) > 0:
+                print(f"DEBUG: Latest available date found: {check_date}")
+                self._latest_date_cache = check_date
+                return check_date
+        
+        # Fallback to hardcoded if nothing found
+        print("DEBUG: No data found in last 30 days, using fallback date")
+        fallback = "2025-12-02"
+        self._latest_date_cache = fallback
+        return fallback
+    
+    def _get_performance_batch(self, start_date, end_date):
+        """
+        ✅ CACHED: Fetch ALL performance records for a date range ONCE
+        Returns dict: {date: {email: performance_data}}
+        """
+        cache_key = f"{start_date}_{end_date}"
+        
+        if cache_key in self._perf_cache:
+            print(f"DEBUG: Using cached performance data for {start_date} to {end_date}")
+            return self._perf_cache[cache_key]
+        
+        print(f"DEBUG: Fetching all performance data for {start_date} to {end_date} (single API call)")
+        
+        # ✅ SINGLE API CALL - fetch entire range at once
+        all_records = self.performance_tracker.client.get_performance_records(start_date, end_date)
+        
+        # ✅ Build lookup: {date: {email: {revenue, profit, roi, ...}}}
+        perf_by_date = {}
+        
+        for record in all_records:
+            fields = record.get("fields", {})
+            
+            # Extract date
+            date_field = fields.get("date")
+            if not date_field:
+                continue
+            
+            if isinstance(date_field, list) and len(date_field) > 0:
+                record_date = date_field[0].get("text", "") if isinstance(date_field[0], dict) else str(date_field[0])
+            else:
+                record_date = str(date_field)
+            
+            record_date_str = record_date[:10]  # YYYY-MM-DD
+            
+            # Extract email
+            email_field = fields.get("campaign_manager", [{}])
+            email = ""
+            if isinstance(email_field, list) and len(email_field) > 0:
+                email = email_field[0].get("text", "").lower()
+            elif isinstance(email_field, str):
+                email = email_field.lower()
+            
+            if not email or not record_date_str:
+                continue
+            
+            # Extract metrics
+            try:
+                revenue = float(fields.get("revenue", 0) or 0)
+                spend = float(fields.get("spend", 0) or 0)
+                profit = float(fields.get("profit", 0) or 0)
+                roi = float(fields.get("roi", 0) or 0)
+            except (ValueError, TypeError):
+                continue
+            
+            # Group by date and email
+            if record_date_str not in perf_by_date:
+                perf_by_date[record_date_str] = {}
+            
+            if email not in perf_by_date[record_date_str]:
+                perf_by_date[record_date_str][email] = {
+                    "revenue": 0,
+                    "spend": 0,
+                    "profit": 0,
+                    "roi_total": 0,
+                    "roi_count": 0
+                }
+            
+            # Accumulate (in case multiple records per user per day - Ginsu + Bing)
+            perf_by_date[record_date_str][email]["revenue"] += revenue
+            perf_by_date[record_date_str][email]["spend"] += spend
+            perf_by_date[record_date_str][email]["profit"] += profit
+            perf_by_date[record_date_str][email]["roi_total"] += roi
+            perf_by_date[record_date_str][email]["roi_count"] += 1
+        
+        # Cache it
+        self._perf_cache[cache_key] = perf_by_date
+        print(f"DEBUG: Cached {len(perf_by_date)} days of performance data")
+        return perf_by_date
+    
+    def _get_user_performance_from_cache(self, email, target_dates, perf_data):
+        """
+        Get user performance from already-fetched cached data
+        NO additional API calls
+        """
+        revenue_total = 0
+        profit_total = 0
+        roi_total = 0
+        days_with_data = 0
+        
+        for target_date in target_dates:
+            if target_date in perf_data and email in perf_data[target_date]:
+                user_perf = perf_data[target_date][email]
+                revenue_total += user_perf.get("revenue", 0)
+                profit_total += user_perf.get("profit", 0)
+                
+                # Handle ROI properly
+                if user_perf.get("roi_count", 0) > 0:
+                    roi_total += user_perf.get("roi_total", 0) / user_perf.get("roi_count", 1)
+                
+                days_with_data += 1
+        
+        return {
+            "revenue": revenue_total,
+            "profit": profit_total,
+            "roi": roi_total / days_with_data if days_with_data > 0 else 0,
+            "days_with_data": days_with_data
         }
     
     def handle_performance_command(self, text, user_email):
@@ -39,8 +175,11 @@ class PerformanceCommands:
             return self._get_help_text()
         
         # Extract date range and target
-        # ✅ DEFAULT: Last 7 days from latest available data (2025-12-02)
-        latest_date = datetime(2025, 12, 2)
+        # ✅ CACHED: Get latest available date
+        latest_date_str = self._get_latest_available_date_cached()
+        latest_date = datetime.strptime(latest_date_str, "%Y-%m-%d")
+        
+        # ✅ DEFAULT: Last 7 days from latest available data
         target_dates = [(latest_date - timedelta(days=j)).strftime("%Y-%m-%d") for j in range(7)]
         target_dates.reverse()
         target = None
@@ -55,7 +194,6 @@ class PerformanceCommands:
                 target_dates = [datetime.now().strftime("%Y-%m-%d")]
                 skip_indices.add(i)
             elif part == "last" and i + 1 < len(parts) and (parts[i + 1] == "7" or parts[i + 1] == "7 days"):
-                # Last 7 days (from 2025-12-02)
                 target_dates = [(latest_date - timedelta(days=j)).strftime("%Y-%m-%d") for j in range(7)]
                 target_dates.reverse()
                 skip_indices.add(i)
@@ -63,15 +201,16 @@ class PerformanceCommands:
                 if i + 2 < len(parts) and parts[i + 2] == "days":
                     skip_indices.add(i + 2)
             elif part == "mtd" or part == "month":
-                # Month to date (Dec 1-2 for current month, or full Nov if specified)
-                # Use Dec 1-2 as default for current month
+                latest_month = latest_date.month
+                latest_year = latest_date.year
+                first_of_month = datetime(latest_year, latest_month, 1)
+                
                 target_dates = [
-                    (datetime(2025, 12, 1) + timedelta(days=j)).strftime("%Y-%m-%d") 
-                    for j in range(2)  # Dec 1-2
+                    (first_of_month + timedelta(days=j)).strftime("%Y-%m-%d") 
+                    for j in range((latest_date - first_of_month).days + 1)
                 ]
                 skip_indices.add(i)
             elif part == "november" or part == "nov":
-                # Full November (Nov 1-30)
                 target_dates = [
                     (datetime(2025, 11, 1) + timedelta(days=j)).strftime("%Y-%m-%d") 
                     for j in range(30)
@@ -84,16 +223,18 @@ class PerformanceCommands:
                 target = part
                 break
         
+        # ✅ FETCH ONCE - Get all performance data for this date range
+        perf_data = self._get_performance_batch(target_dates[0], target_dates[-1])
+        
         # Route to appropriate handler
         if target == "team":
-            return self._get_all_teams_performance(target_dates)
+            return self._get_all_teams_performance(target_dates, perf_data)
         elif target == "me":
-            return self._get_user_performance(user_email, target_dates)
+            return self._get_user_performance(user_email, target_dates, perf_data)
         elif target and target in ["amanda's", "dioulde's", "kath's", "jello's"]:
             team_name = f"{target.title()} team"
-            return self._get_single_team_performance(team_name, target_dates)
+            return self._get_single_team_performance(team_name, target_dates, perf_data)
         elif target and target in ["amanda", "dioulde", "kath", "jello"]:
-            # Handle shorthand team names
             team_map = {
                 "amanda": "Amanda's Team",
                 "dioulde": "Dioulde's Team",
@@ -102,21 +243,20 @@ class PerformanceCommands:
             }
             team_name = team_map.get(target.lower())
             if team_name:
-                return self._get_single_team_performance(team_name, target_dates)
+                return self._get_single_team_performance(team_name, target_dates, perf_data)
         elif target and "@" in target:
-            return self._get_user_performance(target, target_dates)
+            return self._get_user_performance(target, target_dates, perf_data)
         elif target:
-            # Try to match team name
             team_mapping = self.get_team_mapping()
             for team_name in team_mapping.keys():
                 if target.lower() in team_name.lower():
-                    return self._get_single_team_performance(team_name, target_dates)
+                    return self._get_single_team_performance(team_name, target_dates, perf_data)
             return f"❌ Unknown command: '{target}'. Type 'perf help' for available commands."
         else:
             return self._get_help_text()
 
 
-    def _get_all_teams_performance(self, target_dates):
+    def _get_all_teams_performance(self, target_dates, perf_data):
         """Get performance grouped by team for date range"""
         
         if len(target_dates) == 1:
@@ -138,14 +278,9 @@ class PerformanceCommands:
             team_count = 0
             
             for email in team_emails:
-                revenue_total = 0
-                profit_total = 0
-                
-                for target_date in target_dates:
-                    user_performance = self.performance_tracker.get_user_performance(email, target_date)
-                    if user_performance:
-                        revenue_total += user_performance.get("revenue", 0)
-                        profit_total += user_performance.get("profit", 0)
+                user_perf = self._get_user_performance_from_cache(email, target_dates, perf_data)
+                revenue_total = user_perf["revenue"]
+                profit_total = user_perf["profit"]
                 
                 if revenue_total > 0 or profit_total > 0:
                     team_revenue += revenue_total
@@ -153,10 +288,8 @@ class PerformanceCommands:
                     team_count += 1
                     total_revenue += revenue_total
                     total_profit += profit_total
-                    total_count += 1
             
             if team_count > 0:
-                # Get daily target and multiply by number of days
                 user_targets = self.performance_tracker.get_daily_user_target(target_dates[0], num_media_buyers=9)
                 daily_profit_target = user_targets.get("profit_target", 0) if user_targets else 0
                 
@@ -179,7 +312,7 @@ class PerformanceCommands:
         return message
 
 
-    def _get_single_team_performance(self, team_name, target_dates):
+    def _get_single_team_performance(self, team_name, target_dates, perf_data):
         """Get performance for a specific team with individual member breakdown"""
         
         if len(target_dates) == 1:
@@ -206,33 +339,23 @@ class PerformanceCommands:
                 continue
             
             user_name = user_info.get("name", "")
+            user_perf = self._get_user_performance_from_cache(email, target_dates, perf_data)
             
-            revenue_total = 0
-            profit_total = 0
-            roi_total = 0
-            days_with_data = 0
-            
-            for target_date in target_dates:
-                user_performance = self.performance_tracker.get_user_performance(email, target_date)
-                
-                if user_performance:
-                    revenue_total += user_performance.get("revenue", 0)
-                    profit_total += user_performance.get("profit", 0)
-                    roi_total += user_performance.get("roi", 0)
-                    days_with_data += 1
+            revenue_total = user_perf["revenue"]
+            profit_total = user_perf["profit"]
+            avg_roi = user_perf["roi"]
+            days_with_data = user_perf["days_with_data"]
             
             if days_with_data > 0:
                 team_revenue += revenue_total
                 team_profit += profit_total
                 team_count += 1
                 
-                # Get daily target
                 user_targets = self.performance_tracker.get_daily_user_target(target_dates[0], num_media_buyers=9)
                 daily_profit_target = user_targets.get("profit_target", 0) if user_targets else 0
                 
                 profit_target = daily_profit_target * len(target_dates)
                 profit_pct = (profit_total / profit_target * 100) if profit_target > 0 else 0
-                avg_roi = roi_total / days_with_data
                 
                 status = "✅" if profit_pct >= 100 else "⚠️" if profit_pct >= 80 else "❌"
                 
@@ -255,7 +378,7 @@ class PerformanceCommands:
         return message
 
 
-    def _get_user_performance(self, email, target_dates):
+    def _get_user_performance(self, email, target_dates, perf_data):
         """Get performance for a specific user across date range"""
         
         if len(target_dates) == 1:
@@ -270,7 +393,6 @@ class PerformanceCommands:
         if email in self.user_data:
             user_info = self.user_data[email]
         else:
-            # Try to find by partial match
             for e, info in self.user_data.items():
                 if email.lower() in e.lower() or e.lower() in email.lower():
                     user_info = info
@@ -281,25 +403,16 @@ class PerformanceCommands:
             return f"❌ User '{email}' not found in system"
         
         user_name = user_info.get("name", "")
+        user_perf = self._get_user_performance_from_cache(lookup_email, target_dates, perf_data)
         
-        revenue_total = 0
-        profit_total = 0
-        roi_total = 0
-        days_with_data = 0
-        
-        for target_date in target_dates:
-            user_performance = self.performance_tracker.get_user_performance(lookup_email, target_date)
-            
-            if user_performance:
-                revenue_total += user_performance.get("revenue", 0)
-                profit_total += user_performance.get("profit", 0)
-                roi_total += user_performance.get("roi", 0)
-                days_with_data += 1
+        revenue_total = user_perf["revenue"]
+        profit_total = user_perf["profit"]
+        avg_roi = user_perf["roi"]
+        days_with_data = user_perf["days_with_data"]
         
         if days_with_data == 0:
             return f"❌ No performance data for {user_name} in selected period"
         
-        # Get daily target
         user_targets = self.performance_tracker.get_daily_user_target(target_dates[0], num_media_buyers=9)
         daily_revenue_target = user_targets.get("revenue_target", 0) if user_targets else 0
         daily_profit_target = user_targets.get("profit_target", 0) if user_targets else 0
@@ -309,7 +422,6 @@ class PerformanceCommands:
         
         revenue_pct = (revenue_total / revenue_target * 100) if revenue_target > 0 else 0
         profit_pct = (profit_total / profit_target * 100) if profit_target > 0 else 0
-        avg_roi = (roi_total / days_with_data) if days_with_data > 0 else 0
         
         message = f"""📊 **{user_name}'s Performance - {date_label}**
 
@@ -324,16 +436,15 @@ class PerformanceCommands:
 
     def _get_help_text(self):
         """Return help text for performance commands"""
-        return """📊 **Performance Command Help**
+        return """�� **Performance Command Help**
 
-⏰ **Default: Last 7 Days** (Dec 2025-11-26 to 2025-12-02)
+⏰ **Default: Last 7 Days** (automatically uses latest available data)
 
 **View Your Performance:**
 • `perf me` - Last 7 days
 • `perf me yesterday` - Yesterday only
 • `perf me last 7` - Last 7 days
-• `perf me mtd` - Month to date (Dec 1-2)
-• `perf me november` - Full November
+• `perf me mtd` - Month to date (1st to today)
 
 
 **View All Teams:**
@@ -341,7 +452,6 @@ class PerformanceCommands:
 • `perf team yesterday` - Yesterday only
 • `perf team last 7` - Last 7 days
 • `perf team mtd` - Month to date
-• `perf team november` - Full November
 
 
 **View Specific Team (with individual breakdown):**
@@ -365,5 +475,5 @@ class PerformanceCommands:
 perf me
 perf me mtd
 perf team last 7
-perf amanda november
+perf amanda mtd
 perf amanda.g@intentt.com last 7"""

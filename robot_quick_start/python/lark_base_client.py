@@ -9,7 +9,7 @@ class LarkBaseClient:
         self.app_token = app_token
         self.table_id = table_id
         self.performance_table_id = performance_table_id
-        self.token_manager = token_manager  # Use token manager here
+        self.token_manager = token_manager
         self.host = "https://open.larksuite.com"
         self.headers = {
             "Content-Type": "application/json; charset=utf-8"
@@ -17,33 +17,107 @@ class LarkBaseClient:
 
 
     def _get_headers(self):
-        token = self.token_manager.get_token()  # Always get fresh token
+        token = self.token_manager.get_token()
         headers = self.headers.copy()
         headers["Authorization"] = f"Bearer {token}"
         return headers
 
 
+    def _extract_date_string(self, date_field) -> str:
+        """
+        ✅ FIXED: Extract date string from various formats
+        Handles: datetime objects, strings with/without time, arrays
+        Returns: YYYY-MM-DD format
+        """
+        if not date_field:
+            return None
+        
+        # Handle array format (Lark sometimes returns arrays)
+        if isinstance(date_field, list) and len(date_field) > 0:
+            date_field = date_field[0]
+            if isinstance(date_field, dict):
+                date_field = date_field.get("text", "")
+        
+        # Convert to string
+        date_str = str(date_field)
+        
+        # Extract just YYYY-MM-DD (first 10 chars)
+        if len(date_str) >= 10:
+            return date_str[:10]
+        
+        return date_str
+
+
     def _search_records(self, table_id: str, start_date: str = None, end_date: str = None, page_size: int = 500) -> List[Dict]:
-        """Search records - fetch all and filter client-side"""
+        """
+        ✅ FIXED: Search records with pagination support + infinite loop protection
+        Fetches ALL records (handles 500 row limit with page_token)
+        """
         url = f"{self.host}/open-apis/bitable/v1/apps/{self.app_token}/tables/{table_id}/records/search"
 
-        payload = {"page_size": page_size}
-        print(f"DEBUG: Searching records from table {table_id} (client-side filtering)")
+        print(f"DEBUG: Searching records from table {table_id} (with pagination)")
         print(f"DEBUG: Search URL: {url}")
 
+        all_records = []
+        page_token = None
+        page_count = 0
+        max_pages = 100  # ✅ SAFETY: Prevent infinite loops (max 100 pages = 50k rows)
+        previous_page_token = None  # ✅ SAFETY: Detect if page_token repeats
+
         try:
-            response = requests.post(url, headers=self._get_headers(), json=payload, timeout=10)
-            print(f"DEBUG: Search response status: {response.status_code}")
-            response.raise_for_status()
+            while page_count < max_pages:
+                page_count += 1
+                payload = {"page_size": page_size}
+                
+                if page_token:
+                    payload["page_token"] = page_token
+                    print(f"DEBUG: Fetching page {page_count} with token: {page_token[:20]}...")
+                else:
+                    print(f"DEBUG: Fetching page {page_count} (first page)")
 
-            data = response.json()
+                # ✅ SAFETY: Detect infinite loop (same token twice = API bug)
+                if page_token == previous_page_token:
+                    print(f"ERROR: Infinite loop detected! page_token repeated: {page_token}")
+                    print(f"ERROR: Breaking to prevent infinite loop. Records so far: {len(all_records)}")
+                    break
+                
+                previous_page_token = page_token
 
-            if data.get("code") != 0:
-                print(f"ERROR: Lark API error: {data.get('msg', 'Unknown error')}")
-                return []
+                response = requests.post(url, headers=self._get_headers(), json=payload, timeout=10)
+                print(f"DEBUG: Page {page_count} response status: {response.status_code}")
+                response.raise_for_status()
 
-            all_records = data.get("data", {}).get("items", [])
-            print(f"DEBUG: Fetched {len(all_records)} total records from API")
+                data = response.json()
+
+                if data.get("code") != 0:
+                    print(f"ERROR: Lark API error on page {page_count}: {data.get('msg', 'Unknown error')}")
+                    print(f"ERROR: Returning {len(all_records)} records fetched so far")
+                    return all_records  # Return what we got so far
+
+                page_records = data.get("data", {}).get("items", [])
+                print(f"DEBUG: Page {page_count}: Fetched {len(page_records)} records")
+
+                # ✅ SAFETY: If page is empty, stop (shouldn't happen but extra safety)
+                if len(page_records) == 0:
+                    print(f"DEBUG: Page {page_count} is empty, stopping pagination")
+                    break
+
+                all_records.extend(page_records)
+
+                # Check if there are more pages
+                page_token = data.get("data", {}).get("page_token")
+                if not page_token:
+                    print(f"DEBUG: No more pages. Total records fetched: {len(all_records)} across {page_count} pages")
+                    break
+                
+                # ✅ SAFETY: Warn if approaching max pages
+                if page_count >= max_pages - 5:
+                    print(f"WARNING: Approaching max pages limit ({max_pages}). Already fetched {len(all_records)} records")
+
+            # ✅ SAFETY: Final check if hit max pages without natural exit
+            if page_count >= max_pages:
+                print(f"ERROR: Hit maximum pages limit ({max_pages}). This might indicate an API issue.")
+                print(f"ERROR: Returning {len(all_records)} records fetched so far")
 
             # Client-side date filtering if date range provided
             if start_date and end_date:
@@ -53,21 +127,17 @@ class LarkBaseClient:
                 for record in all_records:
                     fields = record.get("fields", {})
 
-                    # Get date field (first column) - now in ISO 8601 format (YYYY-MM-DD)
+                    # Get date field - now using robust extraction
                     date_field = fields.get("date")
                     if not date_field:
                         continue
 
-                    # Extract date string
-                    if isinstance(date_field, list) and len(date_field) > 0:
-                        record_date = date_field[0].get("text", "") if isinstance(date_field[0], dict) else str(date_field[0])
-                    else:
-                        record_date = str(date_field)
+                    record_date_str = self._extract_date_string(date_field)
+                    
+                    if not record_date_str:
+                        continue
 
-                    # Extract just the date part (YYYY-MM-DD)
-                    record_date_str = record_date[:10] if len(record_date) >= 10 else record_date
-
-                    # ISO 8601 format allows simple string comparison!
+                    # ✅ FIXED: String comparison with consistent format
                     if start_date <= record_date_str <= end_date:
                         filtered_records.append(record)
 
@@ -79,10 +149,12 @@ class LarkBaseClient:
 
         except requests.Timeout:
             print(f"ERROR: Request timeout while fetching records from {table_id}")
-            return []
+            print(f"ERROR: Returning {len(all_records)} records fetched so far")
+            return all_records
         except Exception as e:
             print(f"ERROR: Failed to search records: {e}")
-            return []
+            print(f"ERROR: Returning {len(all_records)} records fetched so far")
+            return all_records
 
 
     def get_user_records(self) -> List[Dict]:
@@ -211,8 +283,8 @@ class PerformanceTracker:
 
         # Default targets (adjust as needed)
         return {
-            "revenue_target": 20000.0 / num_media_buyers,  # ~$2,222 per person
-            "profit_target": 5000.0 / num_media_buyers      # ~$556 per person
+            "revenue_target": 20000.0 / num_media_buyers,
+            "profit_target": 5000.0 / num_media_buyers
         }
 
 
