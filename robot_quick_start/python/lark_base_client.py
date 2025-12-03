@@ -52,6 +52,11 @@ class LarkBaseClient:
         """
         ✅ FIXED: Search records with pagination support + infinite loop protection
         Fetches ALL records (handles 500 row limit with page_token)
+        
+        KEY FIXES:
+        - Removed problematic None == None comparison
+        - Correctly checks if page_token exists before continuing
+        - Returns data immediately when no more pages
         """
         url = f"{self.host}/open-apis/bitable/v1/apps/{self.app_token}/tables/{table_id}/records/search"
 
@@ -62,7 +67,6 @@ class LarkBaseClient:
         page_token = None
         page_count = 0
         max_pages = 100  # ✅ SAFETY: Prevent infinite loops (max 100 pages = 50k rows)
-        previous_page_token = None  # ✅ SAFETY: Detect if page_token repeats
 
         try:
             while page_count < max_pages:
@@ -74,14 +78,6 @@ class LarkBaseClient:
                     print(f"DEBUG: Fetching page {page_count} with token: {page_token[:20]}...")
                 else:
                     print(f"DEBUG: Fetching page {page_count} (first page)")
-
-                # ✅ SAFETY: Detect infinite loop (same token twice = API bug)
-                if page_token == previous_page_token:
-                    print(f"ERROR: Infinite loop detected! page_token repeated: {page_token}")
-                    print(f"ERROR: Breaking to prevent infinite loop. Records so far: {len(all_records)}")
-                    break
-                
-                previous_page_token = page_token
 
                 response = requests.post(url, headers=self._get_headers(), json=payload, timeout=10)
                 print(f"DEBUG: Page {page_count} response status: {response.status_code}")
@@ -97,15 +93,17 @@ class LarkBaseClient:
                 page_records = data.get("data", {}).get("items", [])
                 print(f"DEBUG: Page {page_count}: Fetched {len(page_records)} records")
 
-                # ✅ SAFETY: If page is empty, stop (shouldn't happen but extra safety)
+                # ✅ SAFETY: If page is empty, stop
                 if len(page_records) == 0:
                     print(f"DEBUG: Page {page_count} is empty, stopping pagination")
                     break
 
                 all_records.extend(page_records)
 
-                # Check if there are more pages
+                # ✅ FIX: Get next page token - CORRECT WAY
                 page_token = data.get("data", {}).get("page_token")
+                
+                # ✅ FIX: If no page_token or it's empty/None, we're done - NO MORE PAGES
                 if not page_token:
                     print(f"DEBUG: No more pages. Total records fetched: {len(all_records)} across {page_count} pages")
                     break
@@ -127,7 +125,7 @@ class LarkBaseClient:
                 for record in all_records:
                     fields = record.get("fields", {})
 
-                    # Get date field - now using robust extraction
+                    # Get date field - using robust extraction
                     date_field = fields.get("date")
                     if not date_field:
                         continue
@@ -215,7 +213,6 @@ class LarkBaseClient:
 
         print(f"DEBUG: Fetched user data for {len(user_data)} users")
         return user_data
-
 
 
 class PerformanceTracker:
