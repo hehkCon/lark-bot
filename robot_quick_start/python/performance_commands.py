@@ -21,7 +21,7 @@ class PerformanceCommands:
         return {
             "Amanda's Team": ["amanda.g@intentt.com", "jonas.f@intentt.com", "brent.l@intentt.com"],
             "Dioulde's Team": ["dioulde.n@intentt.com", "rachel.l@intentt.com"],
-            "Kath's Team": ["kath.g@intentt.com", "angelika.m@intentt.com", "job.c@intentt.com"],  # ✅ FIXED: job.c added to Kath's team
+            "Kath's Team": ["kath.g@intentt.com", "angelika.m@intentt.com", "job.c@intentt.com"],
             "Jello's Team": ["jello.c@intentt.com"]
         }
     
@@ -39,7 +39,10 @@ class PerformanceCommands:
             return self._get_help_text()
         
         # Extract date range and target
-        target_dates = [datetime.now().strftime("%Y-%m-%d")]  # Default: today
+        # ✅ DEFAULT: Last 7 days from latest available data (2025-12-02)
+        latest_date = datetime(2025, 12, 2)
+        target_dates = [(latest_date - timedelta(days=j)).strftime("%Y-%m-%d") for j in range(7)]
+        target_dates.reverse()
         target = None
         skip_indices = set()
         
@@ -52,19 +55,27 @@ class PerformanceCommands:
                 target_dates = [datetime.now().strftime("%Y-%m-%d")]
                 skip_indices.add(i)
             elif part == "last" and i + 1 < len(parts) and (parts[i + 1] == "7" or parts[i + 1] == "7 days"):
-                # Last 7 days
-                target_dates = [(datetime.now() - timedelta(days=j)).strftime("%Y-%m-%d") for j in range(7)]
+                # Last 7 days (from 2025-12-02)
+                target_dates = [(latest_date - timedelta(days=j)).strftime("%Y-%m-%d") for j in range(7)]
                 target_dates.reverse()
                 skip_indices.add(i)
                 skip_indices.add(i + 1)
                 if i + 2 < len(parts) and parts[i + 2] == "days":
                     skip_indices.add(i + 2)
             elif part == "mtd" or part == "month":
-                # Month to date (1st of current month to today)
-                today = datetime.now()
-                first_of_month = today.replace(day=1)
-                target_dates = [(first_of_month + timedelta(days=j)).strftime("%Y-%m-%d") 
-                               for j in range((today - first_of_month).days + 1)]
+                # Month to date (Dec 1-2 for current month, or full Nov if specified)
+                # Use Dec 1-2 as default for current month
+                target_dates = [
+                    (datetime(2025, 12, 1) + timedelta(days=j)).strftime("%Y-%m-%d") 
+                    for j in range(2)  # Dec 1-2
+                ]
+                skip_indices.add(i)
+            elif part == "november" or part == "nov":
+                # Full November (Nov 1-30)
+                target_dates = [
+                    (datetime(2025, 11, 1) + timedelta(days=j)).strftime("%Y-%m-%d") 
+                    for j in range(30)
+                ]
                 skip_indices.add(i)
         
         # Second pass: get target (skip date-related indices)
@@ -131,7 +142,7 @@ class PerformanceCommands:
                 profit_total = 0
                 
                 for target_date in target_dates:
-                    user_performance = self.performance_tracker.get_user_performance(email, target_date)  # ✅ FIXED
+                    user_performance = self.performance_tracker.get_user_performance(email, target_date)
                     if user_performance:
                         revenue_total += user_performance.get("revenue", 0)
                         profit_total += user_performance.get("profit", 0)
@@ -146,7 +157,7 @@ class PerformanceCommands:
             
             if team_count > 0:
                 # Get daily target and multiply by number of days
-                user_targets = self.performance_tracker.get_daily_user_target(target_dates[0], num_media_buyers=9)  # ✅ FIXED
+                user_targets = self.performance_tracker.get_daily_user_target(target_dates[0], num_media_buyers=9)
                 daily_profit_target = user_targets.get("profit_target", 0) if user_targets else 0
                 
                 profit_target = daily_profit_target * team_count * len(target_dates)
@@ -202,7 +213,7 @@ class PerformanceCommands:
             days_with_data = 0
             
             for target_date in target_dates:
-                user_performance = self.performance_tracker.get_user_performance(email, target_date)  # ✅ FIXED
+                user_performance = self.performance_tracker.get_user_performance(email, target_date)
                 
                 if user_performance:
                     revenue_total += user_performance.get("revenue", 0)
@@ -216,7 +227,7 @@ class PerformanceCommands:
                 team_count += 1
                 
                 # Get daily target
-                user_targets = self.performance_tracker.get_daily_user_target(target_dates[0], num_media_buyers=9)  # ✅ FIXED
+                user_targets = self.performance_tracker.get_daily_user_target(target_dates[0], num_media_buyers=9)
                 daily_profit_target = user_targets.get("profit_target", 0) if user_targets else 0
                 
                 profit_target = daily_profit_target * len(target_dates)
@@ -230,7 +241,7 @@ class PerformanceCommands:
                 message += f"❌ {user_name}: No data\n"
         
         if team_count > 0:
-            user_targets = self.performance_tracker.get_daily_user_target(target_dates[0], num_media_buyers=9)  # ✅ FIXED
+            user_targets = self.performance_tracker.get_daily_user_target(target_dates[0], num_media_buyers=9)
             daily_profit_target = user_targets.get("profit_target", 0) if user_targets else 0
             team_target = daily_profit_target * team_count * len(target_dates)
             team_profit_pct = (team_profit / team_target * 100) if team_target > 0 else 0
@@ -277,7 +288,7 @@ class PerformanceCommands:
         days_with_data = 0
         
         for target_date in target_dates:
-            user_performance = self.performance_tracker.get_user_performance(lookup_email, target_date)  # ✅ FIXED
+            user_performance = self.performance_tracker.get_user_performance(lookup_email, target_date)
             
             if user_performance:
                 revenue_total += user_performance.get("revenue", 0)
@@ -289,7 +300,7 @@ class PerformanceCommands:
             return f"❌ No performance data for {user_name} in selected period"
         
         # Get daily target
-        user_targets = self.performance_tracker.get_daily_user_target(target_dates[0], num_media_buyers=9)  # ✅ FIXED
+        user_targets = self.performance_tracker.get_daily_user_target(target_dates[0], num_media_buyers=9)
         daily_revenue_target = user_targets.get("revenue_target", 0) if user_targets else 0
         daily_profit_target = user_targets.get("profit_target", 0) if user_targets else 0
         
@@ -315,39 +326,44 @@ class PerformanceCommands:
         """Return help text for performance commands"""
         return """📊 **Performance Command Help**
 
+⏰ **Default: Last 7 Days** (Dec 2025-11-26 to 2025-12-02)
 
 **View Your Performance:**
-• `perf me` - Today
+• `perf me` - Last 7 days
 • `perf me yesterday` - Yesterday only
 • `perf me last 7` - Last 7 days
-• `perf me mtd` - Month to date (1st to today)
+• `perf me mtd` - Month to date (Dec 1-2)
+• `perf me november` - Full November
 
 
 **View All Teams:**
-• `perf team` - Today
+• `perf team` - Last 7 days
 • `perf team yesterday` - Yesterday only
 • `perf team last 7` - Last 7 days
 • `perf team mtd` - Month to date
+• `perf team november` - Full November
 
 
 **View Specific Team (with individual breakdown):**
-• `perf amanda` - Amanda's Team today
+• `perf amanda` - Amanda's Team last 7 days
 • `perf amanda yesterday` - Yesterday only
 • `perf amanda last 7` - Last 7 days
 • `perf amanda mtd` - Month to date
+• `perf amanda november` - Full November
 • `perf dioulde`, `perf kath`, `perf jello` - Other teams
 
 
 **Manager - View Specific Person:**
-• `perf amanda.g@intentt.com` - Today
+• `perf amanda.g@intentt.com` - Last 7 days
 • `perf amanda.g@intentt.com yesterday` - Yesterday
 • `perf amanda.g@intentt.com last 7` - Last 7 days
 • `perf amanda.g@intentt.com mtd` - Month to date
+• `perf amanda.g@intentt.com november` - Full November
 
 
 **Examples:**
 perf me
 perf me mtd
 perf team last 7
-perf amanda mtd
+perf amanda november
 perf amanda.g@intentt.com last 7"""

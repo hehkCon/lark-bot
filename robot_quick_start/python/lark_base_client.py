@@ -23,19 +23,6 @@ class LarkBaseClient:
         return headers
 
 
-    def _normalize_date(self, date_str: str) -> str:
-        """
-        Convert date string to YYYY/MM/DD format (matching Lark Base format)
-        Input: 2025-11-14 or 2025/11/14
-        Output: 2025/11/14
-        """
-        if not date_str:
-            return None
-        
-        # Replace dashes with slashes for consistency
-        return date_str.replace("-", "/")
-
-
     def _search_records(self, table_id: str, start_date: str = None, end_date: str = None, page_size: int = 500) -> List[Dict]:
         """Search records - fetch all and filter client-side"""
         url = f"{self.host}/open-apis/bitable/v1/apps/{self.app_token}/tables/{table_id}/records/search"
@@ -60,17 +47,13 @@ class LarkBaseClient:
 
             # Client-side date filtering if date range provided
             if start_date and end_date:
-                # Normalize dates to YYYY/MM/DD format (matching Lark Base)
-                start_normalized = self._normalize_date(start_date)
-                end_normalized = self._normalize_date(end_date)
-                
-                print(f"DEBUG: Filtering dates from {start_normalized} to {end_normalized}")
+                print(f"DEBUG: Filtering dates from {start_date} to {end_date}")
                 
                 filtered_records = []
                 for record in all_records:
                     fields = record.get("fields", {})
 
-                    # Get date field (first column)
+                    # Get date field (first column) - now in ISO 8601 format (YYYY-MM-DD)
                     date_field = fields.get("date")
                     if not date_field:
                         continue
@@ -81,15 +64,14 @@ class LarkBaseClient:
                     else:
                         record_date = str(date_field)
 
-                    # Normalize to YYYY/MM/DD
-                    record_date_normalized = record_date.replace("-", "/") if record_date else ""
-                    record_date_str = record_date_normalized[:10] if len(record_date_normalized) >= 10 else record_date_normalized
+                    # Extract just the date part (YYYY-MM-DD)
+                    record_date_str = record_date[:10] if len(record_date) >= 10 else record_date
 
-                    # Compare dates
-                    if start_normalized <= record_date_str <= end_normalized:
+                    # ISO 8601 format allows simple string comparison!
+                    if start_date <= record_date_str <= end_date:
                         filtered_records.append(record)
 
-                print(f"DEBUG: Filtered to {len(filtered_records)} records between {start_normalized} and {end_normalized}")
+                print(f"DEBUG: Filtered to {len(filtered_records)} records between {start_date} and {end_date}")
                 return filtered_records
             else:
                 print(f"DEBUG: Returning all {len(all_records)} records (no date filter)")
