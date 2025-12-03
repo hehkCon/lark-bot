@@ -2,6 +2,7 @@ import json
 import logging
 import os
 import threading
+import time  # ✅ ADD THIS IMPORT
 from flask import Flask, jsonify, request
 from api import MessageApiClient, TokenManager
 from lark_base_client import LarkBaseClient, PerformanceTracker
@@ -153,7 +154,7 @@ def callback_event_handler():
             if text_lower == "perf help":
                 try:
                     # Use cached user data
-                    current_time = time.time()
+                    current_time = time.time()  # ✅ time module imported
                     if (not user_data_cache["data"] or 
                         current_time > user_data_cache["expiry"]):
                         print("DEBUG: Refreshing user data cache")
@@ -171,7 +172,7 @@ def callback_event_handler():
             elif text_lower.startswith("perf"):
                 try:
                     # Use cached user data
-                    current_time = time.time()
+                    current_time = time.time()  # ✅ time module imported
                     if (not user_data_cache["data"] or 
                         current_time > user_data_cache["expiry"]):
                         print("DEBUG: Refreshing user data cache")
@@ -241,7 +242,7 @@ I'm your BASE Media Buying Bot. Here's what I can do:
 • `Ginsu 5000 4000` - Calculate commission
 • `RSOC $3,000 $2,500` - Works with $ and commas!
 
-**📊 Creative Tracker**
+**�� Creative Tracker**
 • `creative count Alejandra this month` - Track creatives
 • `creative help` - See all commands
 
@@ -299,4 +300,3 @@ with app.app_context():
 
 if __name__ == "__main__":
     app.run(host="0.0.0.0", port=PORT, debug=DEBUG)
-
