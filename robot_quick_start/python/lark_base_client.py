@@ -15,11 +15,26 @@ class LarkBaseClient:
             "Content-Type": "application/json; charset=utf-8"
         }
 
+
     def _get_headers(self):
         token = self.token_manager.get_token()  # Always get fresh token
         headers = self.headers.copy()
         headers["Authorization"] = f"Bearer {token}"
         return headers
+
+
+    def _normalize_date(self, date_str: str) -> str:
+        """
+        Convert date string to YYYY/MM/DD format (matching Lark Base format)
+        Input: 2025-11-14 or 2025/11/14
+        Output: 2025/11/14
+        """
+        if not date_str:
+            return None
+        
+        # Replace dashes with slashes for consistency
+        return date_str.replace("-", "/")
+
 
     def _search_records(self, table_id: str, start_date: str = None, end_date: str = None, page_size: int = 500) -> List[Dict]:
         """Search records - fetch all and filter client-side"""
@@ -30,7 +45,7 @@ class LarkBaseClient:
         print(f"DEBUG: Search URL: {url}")
 
         try:
-            response = requests.post(url, headers=self._get_headers(), json=payload)
+            response = requests.post(url, headers=self._get_headers(), json=payload, timeout=10)
             print(f"DEBUG: Search response status: {response.status_code}")
             response.raise_for_status()
 
@@ -45,38 +60,54 @@ class LarkBaseClient:
 
             # Client-side date filtering if date range provided
             if start_date and end_date:
+                # Normalize dates to YYYY/MM/DD format (matching Lark Base)
+                start_normalized = self._normalize_date(start_date)
+                end_normalized = self._normalize_date(end_date)
+                
+                print(f"DEBUG: Filtering dates from {start_normalized} to {end_normalized}")
+                
                 filtered_records = []
                 for record in all_records:
                     fields = record.get("fields", {})
 
-                    date_field = fields.get("date") or fields.get("projection_date")  # support projections table
+                    # Get date field (first column)
+                    date_field = fields.get("date")
                     if not date_field:
                         continue
 
+                    # Extract date string
                     if isinstance(date_field, list) and len(date_field) > 0:
                         record_date = date_field[0].get("text", "") if isinstance(date_field[0], dict) else str(date_field[0])
                     else:
                         record_date = str(date_field)
 
-                    record_date_str = record_date[:10] if len(record_date) >= 10 else record_date
+                    # Normalize to YYYY/MM/DD
+                    record_date_normalized = record_date.replace("-", "/") if record_date else ""
+                    record_date_str = record_date_normalized[:10] if len(record_date_normalized) >= 10 else record_date_normalized
 
-                    if start_date <= record_date_str <= end_date:
+                    # Compare dates
+                    if start_normalized <= record_date_str <= end_normalized:
                         filtered_records.append(record)
 
-                print(f"DEBUG: Filtered to {len(filtered_records)} records between {start_date} and {end_date}")
+                print(f"DEBUG: Filtered to {len(filtered_records)} records between {start_normalized} and {end_normalized}")
                 return filtered_records
             else:
                 print(f"DEBUG: Returning all {len(all_records)} records (no date filter)")
                 return all_records
 
+        except requests.Timeout:
+            print(f"ERROR: Request timeout while fetching records from {table_id}")
+            return []
         except Exception as e:
             print(f"ERROR: Failed to search records: {e}")
             return []
+
 
     def get_user_records(self) -> List[Dict]:
         """Get all user records (no date filter needed)"""
         print("DEBUG: Fetching user data...")
         return self._search_records(self.table_id)
+
 
     def get_performance_records(self, start_date: str, end_date: str) -> List[Dict]:
         """Get performance records with CLIENT-SIDE date filtering"""
@@ -86,6 +117,7 @@ class LarkBaseClient:
 
         print(f"DEBUG: Received {len(records)} records from API (already date-filtered client-side)")
         return records
+
 
     def get_user_data_dict(self) -> Dict[str, Dict]:
         """Get user data as dictionary keyed by email"""
@@ -131,10 +163,12 @@ class LarkBaseClient:
         return user_data
 
 
+
 class PerformanceTracker:
     def __init__(self, lark_client: LarkBaseClient):
         self.client = lark_client
         self.performance_table_id = lark_client.performance_table_id
+
 
     def get_user_performance(self, email: str, date: str = None) -> Dict[str, float]:
         """Get performance metrics for a specific user on a specific date"""
@@ -145,10 +179,12 @@ class PerformanceTracker:
 
         records = self.client.get_performance_records(date, date)
         user_records = []
+        
         for record in records:
             fields = record.get("fields", {})
             campaign_manager_field = fields.get("campaign_manager", [{}])
             manager_email = ""
+            
             if isinstance(campaign_manager_field, list) and len(campaign_manager_field) > 0:
                 manager_email = campaign_manager_field[0].get("text", "").lower()
             elif isinstance(campaign_manager_field, str):
@@ -157,9 +193,23 @@ class PerformanceTracker:
             if email.lower() == manager_email:
                 user_records.append(record)
 
-        total_revenue = sum(float(r.get("fields", {}).get("revenue", 0) or 0) for r in user_records)
-        total_spend = sum(float(r.get("fields", {}).get("spend", 0) or 0) for r in user_records)
-        total_profit = sum(float(r.get("fields", {}).get("profit", 0) or 0) for r in user_records)
+        # Sum across all records (all platforms for this user on this date)
+        total_revenue = 0
+        total_spend = 0
+        total_profit = 0
+        
+        for r in user_records:
+            try:
+                revenue = float(r.get("fields", {}).get("revenue", 0) or 0)
+                spend = float(r.get("fields", {}).get("spend", 0) or 0)
+                profit = float(r.get("fields", {}).get("profit", 0) or 0)
+                
+                total_revenue += revenue
+                total_spend += spend
+                total_profit += profit
+            except (ValueError, TypeError):
+                continue
+
         roi = (total_profit / total_spend * 100) if total_spend > 0 else 0
 
         return {
@@ -169,33 +219,25 @@ class PerformanceTracker:
             "roi": roi
         }
 
+
     def get_daily_user_target(self, date: str = None, num_media_buyers: int = 9) -> Dict[str, float]:
-        """Get daily performance targets for users"""
+        """Get daily performance targets for users - FIXED targets"""
         from datetime import datetime as dt
 
         if not date:
             date = dt.now().strftime("%Y-%m-%d")
 
-        records = self.client._search_records(self.performance_table_id, date, date)
-        if not records:
-            # Fallback default targets
-            return {
-                "revenue_target": 20000 / num_media_buyers,
-                "profit_target": 5000 / num_media_buyers
-            }
-
-        fields = records[0].get("fields", {})
-        daily_revenue_target = float(fields.get("daily_revenue_target", 180000) or 180000) / num_media_buyers
-        daily_profit_target = float(fields.get("daily_profit_target", 45000) or 45000) / num_media_buyers
-
+        # Default targets (adjust as needed)
         return {
-            "revenue_target": daily_revenue_target,
-            "profit_target": daily_profit_target
+            "revenue_target": 20000.0 / num_media_buyers,  # ~$2,222 per person
+            "profit_target": 5000.0 / num_media_buyers      # ~$556 per person
         }
+
 
     def get_user_data(self) -> Dict[str, Dict]:
         """Get all user data from user info table"""
         return self.client.get_user_data_dict()
+
 
     def get_today_performance(self) -> Dict:
         """Fetch today's performance data"""
@@ -203,6 +245,7 @@ class PerformanceTracker:
 
         today = dt.now().strftime("%Y-%m-%d")
         return {"date": today, "records": self.client.get_performance_records(today, today)}
+
 
     def get_today_projections(self) -> Dict:
         """Fetch today's projection/target data"""
@@ -212,20 +255,26 @@ class PerformanceTracker:
         records = self.client._search_records(self.performance_table_id, today, today)
         return {"date": today, "records": records}
 
+
     def compare_performance_to_targets(self, performance_data: Dict, projections_data: Dict) -> Dict:
         """Compare performance vs targets"""
         performance_records = performance_data.get("records", [])
-        total_revenue = sum(float(r.get("fields", {}).get("revenue", 0) or 0) for r in performance_records)
-        total_profit = sum(float(r.get("fields", {}).get("profit", 0) or 0) for r in performance_records)
+        
+        total_revenue = 0
+        total_profit = 0
+        
+        for r in performance_records:
+            try:
+                revenue = float(r.get("fields", {}).get("revenue", 0) or 0)
+                profit = float(r.get("fields", {}).get("profit", 0) or 0)
+                total_revenue += revenue
+                total_profit += profit
+            except (ValueError, TypeError):
+                continue
 
-        projection_records = projections_data.get("records", [])
-        if projection_records:
-            fields = projection_records[0].get("fields", {})
-            revenue_target = float(fields.get("daily_revenue_target", 0) or 0)
-            profit_target = float(fields.get("daily_profit_target", 0) or 0)
-        else:
-            revenue_target = 180000
-            profit_target = 45000
+        # Fixed targets
+        revenue_target = 180000
+        profit_target = 45000
 
         return {
             "total_revenue": total_revenue,
@@ -235,6 +284,7 @@ class PerformanceTracker:
             "revenue_pct": (total_revenue / revenue_target * 100) if revenue_target > 0 else 0,
             "profit_pct": (total_profit / profit_target * 100) if profit_target > 0 else 0
         }
+
 
     def generate_performance_message(self, team_name: str, comparison: Dict) -> str:
         """Generate formatted team performance message"""
@@ -251,6 +301,7 @@ Profit: ${comparison['total_profit']:,.0f} / ${comparison['profit_target']:,.0f}
 Keep up the great work! 🚀"""
 
         return message
+
 
     def generate_user_performance_message(self, user_name: str, user_performance: Dict, user_targets: Dict) -> str:
         """Generate personalized message for individual user"""
@@ -275,4 +326,3 @@ ROI: {roi:.1f}%
 You've got this! 💪"""
 
         return message
-
