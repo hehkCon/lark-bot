@@ -22,6 +22,7 @@ LARK_BASE_APP_TOKEN = os.getenv("LARK_BASE_APP_TOKEN")
 LARK_BASE_PERFORMANCE_TABLE_ID = os.getenv("LARK_BASE_PERFORMANCE_TABLE_ID")
 LARK_BASE_PROJECTIONS_TABLE_ID = os.getenv("LARK_BASE_PROJECTIONS_TABLE_ID")
 LARK_BASE_USER_INFO_TABLE_ID = os.getenv("LARK_BASE_USER_INFO_TABLE_ID")
+LARK_BASE_COMBINED_PERFORMANCE_TABLE_ID = os.getenv("LARK_BASE_COMBINED_PERFORMANCE_TABLE_ID")
 
 
 
@@ -31,6 +32,7 @@ print(f"DEBUG: APP_SECRET={'SET' if APP_SECRET else 'NOT SET'}")
 print(f"DEBUG: LARK_HOST={LARK_HOST}")
 print(f"DEBUG: LARK_BASE_APP_TOKEN={'SET' if LARK_BASE_APP_TOKEN else 'MISSING'}")
 print(f"DEBUG: LARK_BASE_USER_INFO_TABLE_ID={LARK_BASE_USER_INFO_TABLE_ID}")
+print(f"DEBUG: LARK_BASE_COMBINED_PERFORMANCE_TABLE_ID={LARK_BASE_COMBINED_PERFORMANCE_TABLE_ID}")
 
 
 
@@ -61,7 +63,7 @@ def get_performance_tracker():
     lark_client = LarkBaseClient(
         app_token=LARK_BASE_APP_TOKEN,
         table_id=LARK_BASE_USER_INFO_TABLE_ID,
-        performance_table_id=LARK_BASE_PERFORMANCE_TABLE_ID,
+        performance_table_id=LARK_BASE_COMBINED_PERFORMANCE_TABLE_ID,
         token=token_manager.get_token()
     )
     return PerformanceTracker(lark_client=lark_client)

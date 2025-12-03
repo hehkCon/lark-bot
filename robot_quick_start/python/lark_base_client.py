@@ -15,99 +15,75 @@ class LarkBaseClient:
             "Content-Type": "application/json; charset=utf-8"
         }
 
-    def _search_records(self, table_id: str, page_size: int = 500) -> List[Dict]:
-        """Search records with FULL pagination support"""
+    def _search_records(self, table_id: str, start_date: str = None, end_date: str = None, page_size: int = 500) -> List[Dict]:
+        """Search records with optional DATE FILTERING - returns only records in date range."""
         url = f"{self.host}/open-apis/bitable/v1/apps/{self.app_token}/tables/{table_id}/records/search"
         
-        all_records = []
-        page_token = None
-        
-        while True:
-            payload = {"page_size": page_size}
-            if page_token:
-                payload["page_token"] = page_token
+        # If date range provided, filter on server side
+        if start_date and end_date:
+            start_iso = f"{start_date}T00:00:00+00:00"
+            end_iso = f"{end_date}T23:59:59+00:00"
             
-            print(f"DEBUG: Searching records from table {table_id}")
-            print(f"DEBUG: Search URL: {url}")
-            print(f"DEBUG: Headers: {self.headers}")
-            print(f"DEBUG: Payload: {json.dumps(payload)}")
-            
-            try:
-                response = requests.post(url, headers=self.headers, json=payload)
-                print(f"DEBUG: Search response status: {response.status_code}")
-                response.raise_for_status()
-                
-                data = response.json()
-                print(f"DEBUG: Search response: {json.dumps(data, indent=2)[:500]}...")
-                
-                if data.get("code") != 0:
-                    print(f"ERROR: Lark API error: {data.get('msg', 'Unknown error')}")
-                    break
-                
-                records = data.get("data", {}).get("items", [])
-                all_records.extend(records)
-                print(f"DEBUG: Fetched {len(records)} records (total so far: {len(all_records)})")
-                
-                # Check for more pages
-                page_data = data.get("data", {})
-                has_more = page_data.get("has_more", False)
-                
-                if not has_more:
-                    print(f"DEBUG: No more pages. Total records fetched: {len(all_records)}")
-                    break
-                
-                page_token = page_data.get("page_token")
-                print(f"DEBUG: has_more is True. Next page_token: {page_token}")
-                
-            except Exception as e:
-                print(f"ERROR: Failed to search records: {e}")
-                break
+            payload = {
+                "filter": {
+                    "conjunction": "and",
+                    "conditions": [
+                        {
+                            "field_name": "date",
+                            "operator": "isBetween",
+                            "value": [start_iso, end_iso]
+                        }
+                    ]
+                },
+                "page_size": 500
+            }
+            print(f"DEBUG: Date filter: {start_date} to {end_date}")
+        else:
+            # No date filter - fetch all records from table
+            payload = {"page_size": 500}
+            print(f"DEBUG: No date filter - fetching all records")
         
-        return all_records
+        print(f"DEBUG: Searching records from table {table_id}")
+        print(f"DEBUG: Search URL: {url}")
+        print(f"DEBUG: Payload: {json.dumps(payload)}")
+        
+        try:
+            response = requests.post(url, headers=self.headers, json=payload)
+            print(f"DEBUG: Search response status: {response.status_code}")
+            response.raise_for_status()
+            
+            data = response.json()
+            print(f"DEBUG: Search response: {json.dumps(data, indent=2)[:500]}...")
+            
+            if data.get("code") != 0:
+                print(f"ERROR: Lark API error: {data.get('msg', 'Unknown error')}")
+                return []
+            
+            records = data.get("data", {}).get("items", [])
+            if start_date and end_date:
+                print(f"DEBUG: Fetched {len(records)} records (DATE FILTERED - no pagination needed)")
+            else:
+                print(f"DEBUG: Fetched {len(records)} records (no date filter)")
+            return records
+            
+        except Exception as e:
+            print(f"ERROR: Failed to search records: {e}")
+            return []
 
     def get_user_records(self) -> List[Dict]:
-        """Get all user records"""
+        """Get all user records (no date filter needed)"""
         print("DEBUG: Fetching user data...")
         return self._search_records(self.table_id)
 
     def get_performance_records(self, start_date: str, end_date: str) -> List[Dict]:
-        """Get performance records with CORRECT date filtering"""
+        """Get performance records with SERVER-SIDE date filtering"""
         print(f"DEBUG: Fetching performance records for {start_date} to {end_date}")
         
-        # Fetch all records with pagination
-        all_records = self._search_records(self.performance_table_id)
+        # Fetch records with date filter on server side
+        records = self._search_records(self.performance_table_id, start_date, end_date)
         
-        # Parse dates
-        start = datetime.strptime(start_date, "%Y-%m-%d").date()
-        end = datetime.strptime(end_date, "%Y-%m-%d").date()
-        
-        filtered = []
-        
-        for record in all_records:
-            fields = record.get("fields", {})
-            
-            # Convert timestamp (in milliseconds) to date
-            timestamp_ms = fields.get("date", 0)
-            if not timestamp_ms:
-                print(f"DEBUG: Skipped record (no date field)")
-                continue
-            
-            try:
-                record_date = datetime.fromtimestamp(timestamp_ms / 1000).date()
-            except Exception as e:
-                print(f"DEBUG: Failed to parse timestamp {timestamp_ms}: {e}")
-                continue
-            
-            # Filter by date range (inclusive)
-            if start <= record_date <= end:
-                filtered.append(record)
-                spend = float(fields.get("spend", 0) or 0)
-                revenue = float(fields.get("revenue", 0) or 0)
-                profit = float(fields.get("profit", 0) or 0)
-                print(f"DEBUG: ✓ Included {record_date} | spend=${spend:.2f} revenue=${revenue:.2f} profit=${profit:.2f}")
-        
-        print(f"DEBUG: Filtered {len(all_records)} total → {len(filtered)} records in date range {start_date} to {end_date}")
-        return filtered
+        print(f"DEBUG: Received {len(records)} records from API (already date-filtered)")
+        return records
 
     def get_user_data_dict(self) -> Dict[str, Dict]:
         """Get user data as dictionary keyed by email"""
@@ -182,6 +158,8 @@ class PerformanceCommands:
 
     def _parse_date_range(self, text: str) -> tuple:
         """Parse date range from command text"""
+        from datetime import timedelta
+        
         text_lower = text.lower()
         today = datetime.now().date()
         
@@ -292,7 +270,6 @@ class PerformanceCommands:
     def handle_performance_command(self, text: str, user_open_id: str) -> str:
         """Main command handler"""
         import re
-        from datetime import timedelta
         
         text_parts = text.lower().strip().split()
         if len(text_parts) < 2:
@@ -317,7 +294,7 @@ class PerformanceCommands:
             records = self.performance_tracker.get_performance_records(date_range)
             return self._format_performance_message("Your Performance", date_range, records)
         
-        # Email-based user lookup - FIXED ✅
+        # Email-based user lookup
         elif "@" in command_type:
             # Extract clean email (remove mailto: and brackets)
             clean_email = re.sub(r'\[|\]|\(mailto:|\)', '', command_type).strip().lower()
