@@ -1,6 +1,6 @@
 import requests
 import json
-from datetime import datetime
+from datetime import datetime, timedelta
 from typing import List, Dict, Any
 
 
@@ -25,7 +25,7 @@ class LarkBaseClient:
 
     def _extract_date_string(self, date_field) -> str:
         """
-        ✅ FIXED: Extract date string from various formats
+        ✅ Extract date string from various formats
         Handles: datetime objects, strings with/without time, arrays
         Returns: YYYY-MM-DD format
         """
@@ -50,23 +50,30 @@ class LarkBaseClient:
 
     def _search_records(self, table_id: str, start_date: str = None, end_date: str = None, page_size: int = 500) -> List[Dict]:
         """
-        ✅ FIXED: Search records with pagination support + infinite loop protection
-        Fetches ALL records (handles 500 row limit with page_token)
+        ✅ FIXED: Safe pagination with strict limits and token detection
         
-        KEY FIXES:
-        - Removed problematic None == None comparison
-        - Correctly checks if page_token exists before continuing
-        - Returns data immediately when no more pages
+        SAFETY FEATURES:
+        - Max 10 pages (5000 records) - prevents runaway queries
+        - Detects repeated tokens immediately
+        - Returns gracefully if loop is detected
+        - Only queries the requested date range
+        
+        Args:
+            table_id: Lark table ID
+            start_date: YYYY-MM-DD format
+            end_date: YYYY-MM-DD format
+            page_size: Records per page (default 500)
+        
+        Returns:
+            List of records, already date-filtered
         """
         url = f"{self.host}/open-apis/bitable/v1/apps/{self.app_token}/tables/{table_id}/records/search"
 
-        print(f"DEBUG: Searching records from table {table_id} (with pagination)")
-        print(f"DEBUG: Search URL: {url}")
-
         all_records = []
         page_token = None
+        previous_token = None
         page_count = 0
-        max_pages = 100  # ✅ SAFETY: Prevent infinite loops (max 100 pages = 50k rows)
+        max_pages = 10  # ✅ STRICT LIMIT: max 10 pages = 5000 records
 
         try:
             while page_count < max_pages:
@@ -75,83 +82,74 @@ class LarkBaseClient:
                 
                 if page_token:
                     payload["page_token"] = page_token
-                    print(f"DEBUG: Fetching page {page_count} with token: {page_token[:20]}...")
+                    print(f"DEBUG: Fetching page {page_count} with token")
                 else:
                     print(f"DEBUG: Fetching page {page_count} (first page)")
-
+                
                 response = requests.post(url, headers=self._get_headers(), json=payload, timeout=10)
-                print(f"DEBUG: Page {page_count} response status: {response.status_code}")
                 response.raise_for_status()
 
                 data = response.json()
 
                 if data.get("code") != 0:
-                    print(f"ERROR: Lark API error on page {page_count}: {data.get('msg', 'Unknown error')}")
-                    print(f"ERROR: Returning {len(all_records)} records fetched so far")
-                    return all_records  # Return what we got so far
+                    print(f"ERROR: Lark API error: {data.get('msg', 'Unknown error')}")
+                    return all_records
 
                 page_records = data.get("data", {}).get("items", [])
-                print(f"DEBUG: Page {page_count}: Fetched {len(page_records)} records")
-
-                # ✅ SAFETY: If page is empty, stop
-                if len(page_records) == 0:
-                    print(f"DEBUG: Page {page_count} is empty, stopping pagination")
-                    break
-
                 all_records.extend(page_records)
+                print(f"DEBUG: Page {page_count}: Fetched {len(page_records)} records (total: {len(all_records)})")
 
-                # ✅ FIX: Get next page token - CORRECT WAY
+                # ✅ CRITICAL: Detect token repetition (infinite loop indicator)
                 page_token = data.get("data", {}).get("page_token")
                 
-                # ✅ FIX: If no page_token or it's empty/None, we're done - NO MORE PAGES
-                if not page_token:
-                    print(f"DEBUG: No more pages. Total records fetched: {len(all_records)} across {page_count} pages")
+                if page_token and page_token == previous_token:
+                    print(f"ERROR: ⚠️  INFINITE LOOP DETECTED - Token not advancing!")
+                    print(f"ERROR: Stopping to prevent API spam. Got {len(all_records)} records so far.")
                     break
                 
-                # ✅ SAFETY: Warn if approaching max pages
-                if page_count >= max_pages - 5:
-                    print(f"WARNING: Approaching max pages limit ({max_pages}). Already fetched {len(all_records)} records")
+                previous_token = page_token
 
-            # ✅ SAFETY: Final check if hit max pages without natural exit
+                # ✅ Natural end: fewer records than page_size
+                if len(page_records) < page_size:
+                    print(f"DEBUG: Natural pagination end (got {len(page_records)} < {page_size})")
+                    break
+
+                # ✅ No more pages
+                if not page_token:
+                    print(f"DEBUG: No more pages (page_token is None)")
+                    break
+
+            # ✅ Warn if hit max pages
             if page_count >= max_pages:
-                print(f"ERROR: Hit maximum pages limit ({max_pages}). This might indicate an API issue.")
-                print(f"ERROR: Returning {len(all_records)} records fetched so far")
+                print(f"WARNING: Hit max pages limit ({max_pages}). May have more data in Lark Base.")
+                print(f"WARNING: Consider splitting query into smaller date ranges.")
 
-            # Client-side date filtering if date range provided
+            # Client-side date filtering
             if start_date and end_date:
-                print(f"DEBUG: Filtering dates from {start_date} to {end_date}")
-                
                 filtered_records = []
                 for record in all_records:
                     fields = record.get("fields", {})
-
-                    # Get date field - using robust extraction
                     date_field = fields.get("date")
                     if not date_field:
                         continue
 
                     record_date_str = self._extract_date_string(date_field)
-                    
                     if not record_date_str:
                         continue
 
-                    # ✅ FIXED: String comparison with consistent format
                     if start_date <= record_date_str <= end_date:
                         filtered_records.append(record)
 
-                print(f"DEBUG: Filtered to {len(filtered_records)} records between {start_date} and {end_date}")
+                print(f"DEBUG: Filtered to {len(filtered_records)} records in date range {start_date} to {end_date}")
                 return filtered_records
             else:
-                print(f"DEBUG: Returning all {len(all_records)} records (no date filter)")
                 return all_records
 
         except requests.Timeout:
-            print(f"ERROR: Request timeout while fetching records from {table_id}")
-            print(f"ERROR: Returning {len(all_records)} records fetched so far")
+            print(f"ERROR: Request timeout while fetching records")
             return all_records
         except Exception as e:
             print(f"ERROR: Failed to search records: {e}")
-            print(f"ERROR: Returning {len(all_records)} records fetched so far")
             return all_records
 
 
@@ -162,12 +160,12 @@ class LarkBaseClient:
 
 
     def get_performance_records(self, start_date: str, end_date: str) -> List[Dict]:
-        """Get performance records with CLIENT-SIDE date filtering"""
+        """Get performance records with date range (client-side filtering)"""
         print(f"DEBUG: Fetching performance records for {start_date} to {end_date}")
 
         records = self._search_records(self.performance_table_id, start_date, end_date)
 
-        print(f"DEBUG: Received {len(records)} records from API (already date-filtered client-side)")
+        print(f"DEBUG: Received {len(records)} records")
         return records
 
 
@@ -209,9 +207,7 @@ class LarkBaseClient:
                 "record_id": record.get("record_id")
             }
 
-            print(f"DEBUG: Added user: {name} ({email}) -> {department}")
-
-        print(f"DEBUG: Fetched user data for {len(user_data)} users")
+        print(f"DEBUG: Loaded {len(user_data)} users from Lark Base")
         return user_data
 
 
@@ -272,13 +268,12 @@ class PerformanceTracker:
 
 
     def get_daily_user_target(self, date: str = None, num_media_buyers: int = 9) -> Dict[str, float]:
-        """Get daily performance targets for users - FIXED targets"""
+        """Get daily performance targets for users"""
         from datetime import datetime as dt
 
         if not date:
             date = dt.now().strftime("%Y-%m-%d")
 
-        # Default targets (adjust as needed)
         return {
             "revenue_target": 20000.0 / num_media_buyers,
             "profit_target": 5000.0 / num_media_buyers
@@ -298,15 +293,6 @@ class PerformanceTracker:
         return {"date": today, "records": self.client.get_performance_records(today, today)}
 
 
-    def get_today_projections(self) -> Dict:
-        """Fetch today's projection/target data"""
-        from datetime import datetime as dt
-
-        today = dt.now().strftime("%Y-%m-%d")
-        records = self.client._search_records(self.performance_table_id, today, today)
-        return {"date": today, "records": records}
-
-
     def compare_performance_to_targets(self, performance_data: Dict, projections_data: Dict) -> Dict:
         """Compare performance vs targets"""
         performance_records = performance_data.get("records", [])
@@ -323,7 +309,6 @@ class PerformanceTracker:
             except (ValueError, TypeError):
                 continue
 
-        # Fixed targets
         revenue_target = 180000
         profit_target = 45000
 
