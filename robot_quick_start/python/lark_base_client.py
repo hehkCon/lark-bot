@@ -26,7 +26,7 @@ class LarkBaseClient:
     def _extract_date_string(self, date_field) -> str:
         """
         ✅ FIXED: Extract date string from various formats
-        Handles: datetime objects, strings with/without time, arrays
+        Handles: Unix timestamps (milliseconds), datetime objects, strings with/without time, arrays
         Returns: YYYY-MM-DD format
         """
         if not date_field:
@@ -38,6 +38,13 @@ class LarkBaseClient:
             if isinstance(date_field, dict):
                 date_field = date_field.get("text", "")
         
+        # ✅ CRITICAL FIX: Handle Unix timestamp in milliseconds
+        if isinstance(date_field, (int, float)):
+            # Convert milliseconds to seconds
+            timestamp_seconds = date_field / 1000
+            dt = datetime.fromtimestamp(timestamp_seconds)
+            return dt.strftime("%Y-%m-%d")
+        
         # Convert to string
         date_str = str(date_field)
         
@@ -46,6 +53,40 @@ class LarkBaseClient:
             return date_str[:10]
         
         return date_str
+
+
+    def _extract_email_from_field(self, email_field) -> str:
+        """
+        ✅ FIXED: Extract email from various field formats
+        Handles: arrays with text objects, strings, None values
+        Returns: Email string or empty string
+        """
+        if not email_field:
+            return ""
+        
+        # Handle array format: [{"text": "email@domain.com", "type": "text"}]
+        if isinstance(email_field, list) and len(email_field) > 0:
+            item = email_field[0]
+            if isinstance(item, dict):
+                email = item.get("text", "").strip()
+                # Skip "-" or "missing" indicators
+                if email and email != "-":
+                    return email.lower()
+                return ""
+            elif isinstance(item, str):
+                email = item.strip().lower()
+                if email and email != "-":
+                    return email
+                return ""
+        
+        # Handle string format
+        if isinstance(email_field, str):
+            email = email_field.strip().lower()
+            if email and email != "-":
+                return email
+            return ""
+        
+        return ""
 
 
     def _search_records(self, table_id: str, start_date: str = None, end_date: str = None, page_size: int = 500) -> List[Dict]:
@@ -61,7 +102,6 @@ class LarkBaseClient:
 
         all_records = []
         page_token = None
-        debug_first_record_printed = False
 
         try:
             while True:  # Keep going until we're told to stop
@@ -80,30 +120,6 @@ class LarkBaseClient:
                     return all_records
 
                 page_records = data.get("data", {}).get("items", [])
-                
-                # ✅ DEBUG: Print first record structure to diagnose date field issue
-                if page_records and not debug_first_record_printed:
-                    debug_first_record_printed = True
-                    first_rec = page_records[0]
-                    fields = first_rec.get("fields", {})
-                    print(f"DEBUG: === FIRST RECORD STRUCTURE ===")
-                    print(f"DEBUG: All field keys: {list(fields.keys())}")
-                    if "date" in fields:
-                        date_val = fields["date"]
-                        print(f"DEBUG: 'date' field raw value: {repr(date_val)}")
-                        print(f"DEBUG: 'date' field type: {type(date_val)}")
-                        extracted = self._extract_date_string(date_val)
-                        print(f"DEBUG: 'date' field extracted: {extracted}")
-                    else:
-                        print(f"DEBUG: 'date' field NOT FOUND in record")
-                    if "campaign_manager" in fields:
-                        mgr_val = fields["campaign_manager"]
-                        print(f"DEBUG: 'campaign_manager' raw value: {repr(mgr_val)}")
-                        print(f"DEBUG: 'campaign_manager' type: {type(mgr_val)}")
-                    else:
-                        print(f"DEBUG: 'campaign_manager' field NOT FOUND")
-                    print(f"DEBUG: === END FIRST RECORD ===")
-                
                 all_records.extend(page_records)
 
                 # ✅ EFFICIENT: Stop when we get fewer records than requested
@@ -122,28 +138,18 @@ class LarkBaseClient:
             if start_date and end_date:
                 print(f"DEBUG: Filtering {len(all_records)} records for date range {start_date} to {end_date}")
                 filtered_records = []
-                for i, record in enumerate(all_records):
+                for record in all_records:
                     fields = record.get("fields", {})
                     date_field = fields.get("date")
                     if not date_field:
-                        if i == 0:
-                            print(f"DEBUG: Record {i} has NO date field")
                         continue
 
                     record_date_str = self._extract_date_string(date_field)
                     if not record_date_str:
-                        if i == 0:
-                            print(f"DEBUG: Record {i} extracted date is None/empty")
                         continue
-
-                    # Debug first few records
-                    if i < 3:
-                        print(f"DEBUG: Record {i}: raw date={repr(date_field)} -> extracted={record_date_str}")
 
                     if start_date <= record_date_str <= end_date:
                         filtered_records.append(record)
-                    elif i < 3:
-                        print(f"DEBUG: Record {i} date {record_date_str} NOT in range [{start_date}, {end_date}]")
 
                 print(f"DEBUG: Filtered to {len(filtered_records)} records in date range {start_date} to {end_date}")
                 return filtered_records
@@ -236,14 +242,11 @@ class PerformanceTracker:
         
         for record in records:
             fields = record.get("fields", {})
-            campaign_manager_field = fields.get("campaign_manager", [{}])
-            manager_email = ""
+            campaign_manager_field = fields.get("campaign_manager", "")
             
-            if isinstance(campaign_manager_field, list) and len(campaign_manager_field) > 0:
-                manager_email = campaign_manager_field[0].get("text", "").lower()
-            elif isinstance(campaign_manager_field, str):
-                manager_email = campaign_manager_field.lower()
-
+            # ✅ FIXED: Use _extract_email_from_field to properly parse campaign_manager
+            manager_email = self.client._extract_email_from_field(campaign_manager_field)
+            
             if email.lower() == manager_email:
                 user_records.append(record)
 
