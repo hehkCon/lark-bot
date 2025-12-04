@@ -1,5 +1,5 @@
-# performance_commands.py - CORRECTED version
-# Uses campaign_manager field (with proper email extraction)
+# performance_commands.py - FINAL CORRECTED VERSION
+# Fixed: Use proper date ranges instead of just "today"
 
 class PerformanceCommands:
     def __init__(self, performance_tracker, user_data: dict):
@@ -65,7 +65,7 @@ class PerformanceCommands:
         for email in emails:
             perf_by_email[email] = {"revenue": 0, "spend": 0, "profit": 0, "days_with_data": 0}
         
-        # ✅ CORRECTED: Using campaign_manager field with proper email extraction
+        # ✅ Using campaign_manager field with proper email extraction
         for record in records:
             fields = record.get("fields", {})
             campaign_manager_field = fields.get("campaign_manager", "")
@@ -203,18 +203,30 @@ Type `perf help` anytime for this menu! 🚀"""
             
             # Check if they're a media buyer
             if "media_buying" in user_info.get("department", ""):
-                # Get individual performance
-                perf = self.tracker.get_user_performance(email, today)
-                targets = self.tracker.get_daily_user_target()
+                # ✅ FIXED: Use date range instead of just today
+                perf = self._get_performance_batch([email], start_date, end_date)
                 
-                if perf["revenue"] > 0 or perf["spend"] > 0 or perf["profit"] > 0:
-                    # They have individual data
-                    message = self.tracker.generate_user_performance_message(
-                        user_info["name"], perf, targets
-                    )
+                if email in perf and (perf[email]["revenue"] > 0 or perf[email]["spend"] > 0 or perf[email]["profit"] > 0):
+                    # Calculate metrics from batch result
+                    metrics = perf[email]
+                    total_revenue = metrics["revenue"]
+                    total_spend = metrics["spend"]
+                    total_profit = metrics["profit"]
+                    roi = (total_profit / total_spend * 100) if total_spend > 0 else 0
+                    
+                    status = "✅" if roi >= 20 else "⚠️" if roi >= 10 else "❌"
+                    
+                    message = f"""{status} **{user_info["name"]}'s Performance** ({start_date} to {end_date})
+
+Revenue: ${total_revenue:,.0f}
+Spend: ${total_spend:,.0f}
+Profit: ${total_profit:,.0f}
+ROI: {roi:.1f}%
+Days: {metrics["days_with_data"]}"""
+                    
                     return message
                 else:
-                    return f"❌ No performance data for {user_info['name']} in selected period"
+                    return f"❌ No performance data for {user_info['name']} from {start_date} to {end_date}"
             
             # Non-media-buying user
             return f"❌ No performance data for {user_info['name']} in selected period"
@@ -238,7 +250,7 @@ Type `perf help` anytime for this menu! 🚀"""
         
         status = "✅" if total_profit > 0 else "⚠️"
         
-        return f"""{status} **Team Performance Summary**
+        return f"""{status} **Team Performance** ({start_date} to {end_date})
 
 Revenue: ${total_rev:,.0f}
 Spend: ${total_spend:,.0f}
