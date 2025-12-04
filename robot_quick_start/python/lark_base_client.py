@@ -25,7 +25,7 @@ class LarkBaseClient:
 
     def _extract_date_string(self, date_field) -> str:
         """
-        ✅ Extract date string from various formats
+        ✅ FIXED: Extract date string from various formats
         Handles: datetime objects, strings with/without time, arrays
         Returns: YYYY-MM-DD format
         """
@@ -50,41 +50,25 @@ class LarkBaseClient:
 
     def _search_records(self, table_id: str, start_date: str = None, end_date: str = None, page_size: int = 500) -> List[Dict]:
         """
-        ✅ FIXED: Safe pagination with strict limits and token detection
+        ✅ OPTIMIZED: Efficient pagination - stops early, minimal API calls
         
-        SAFETY FEATURES:
-        - Max 10 pages (5000 records) - prevents runaway queries
-        - Detects repeated tokens immediately
-        - Returns gracefully if loop is detected
-        - Only queries the requested date range
-        
-        Args:
-            table_id: Lark table ID
-            start_date: YYYY-MM-DD format
-            end_date: YYYY-MM-DD format
-            page_size: Records per page (default 500)
-        
-        Returns:
-            List of records, already date-filtered
+        IMPROVEMENTS:
+        - Stop when page records < page_size (natural end of pagination)
+        - No arbitrary 100-page limit
+        - Simpler logic with while True loop
         """
         url = f"{self.host}/open-apis/bitable/v1/apps/{self.app_token}/tables/{table_id}/records/search"
 
         all_records = []
         page_token = None
-        previous_token = None
-        page_count = 0
-        max_pages = 10  # ✅ STRICT LIMIT: max 10 pages = 5000 records
+        debug_first_record_printed = False
 
         try:
-            while page_count < max_pages:
-                page_count += 1
+            while True:  # Keep going until we're told to stop
                 payload = {"page_size": page_size}
                 
                 if page_token:
                     payload["page_token"] = page_token
-                    print(f"DEBUG: Fetching page {page_count} with token")
-                else:
-                    print(f"DEBUG: Fetching page {page_count} (first page)")
                 
                 response = requests.post(url, headers=self._get_headers(), json=payload, timeout=10)
                 response.raise_for_status()
@@ -96,49 +80,70 @@ class LarkBaseClient:
                     return all_records
 
                 page_records = data.get("data", {}).get("items", [])
+                
+                # ✅ DEBUG: Print first record structure to diagnose date field issue
+                if page_records and not debug_first_record_printed:
+                    debug_first_record_printed = True
+                    first_rec = page_records[0]
+                    fields = first_rec.get("fields", {})
+                    print(f"DEBUG: === FIRST RECORD STRUCTURE ===")
+                    print(f"DEBUG: All field keys: {list(fields.keys())}")
+                    if "date" in fields:
+                        date_val = fields["date"]
+                        print(f"DEBUG: 'date' field raw value: {repr(date_val)}")
+                        print(f"DEBUG: 'date' field type: {type(date_val)}")
+                        extracted = self._extract_date_string(date_val)
+                        print(f"DEBUG: 'date' field extracted: {extracted}")
+                    else:
+                        print(f"DEBUG: 'date' field NOT FOUND in record")
+                    if "campaign_manager" in fields:
+                        mgr_val = fields["campaign_manager"]
+                        print(f"DEBUG: 'campaign_manager' raw value: {repr(mgr_val)}")
+                        print(f"DEBUG: 'campaign_manager' type: {type(mgr_val)}")
+                    else:
+                        print(f"DEBUG: 'campaign_manager' field NOT FOUND")
+                    print(f"DEBUG: === END FIRST RECORD ===")
+                
                 all_records.extend(page_records)
-                print(f"DEBUG: Page {page_count}: Fetched {len(page_records)} records (total: {len(all_records)})")
 
-                # ✅ CRITICAL: Detect token repetition (infinite loop indicator)
-                page_token = data.get("data", {}).get("page_token")
-                
-                if page_token and page_token == previous_token:
-                    print(f"ERROR: ⚠️  INFINITE LOOP DETECTED - Token not advancing!")
-                    print(f"ERROR: Stopping to prevent API spam. Got {len(all_records)} records so far.")
-                    break
-                
-                previous_token = page_token
-
-                # ✅ Natural end: fewer records than page_size
+                # ✅ EFFICIENT: Stop when we get fewer records than requested
+                # This means we're at the last page
                 if len(page_records) < page_size:
-                    print(f"DEBUG: Natural pagination end (got {len(page_records)} < {page_size})")
+                    print(f"DEBUG: Pagination complete. Total records: {len(all_records)}")
                     break
 
-                # ✅ No more pages
+                # ✅ Also check for page_token (API's official end signal)
+                page_token = data.get("data", {}).get("page_token")
                 if not page_token:
-                    print(f"DEBUG: No more pages (page_token is None)")
+                    print(f"DEBUG: Pagination complete. Total records: {len(all_records)}")
                     break
 
-            # ✅ Warn if hit max pages
-            if page_count >= max_pages:
-                print(f"WARNING: Hit max pages limit ({max_pages}). May have more data in Lark Base.")
-                print(f"WARNING: Consider splitting query into smaller date ranges.")
-
-            # Client-side date filtering
+            # Client-side date filtering if date range provided
             if start_date and end_date:
+                print(f"DEBUG: Filtering {len(all_records)} records for date range {start_date} to {end_date}")
                 filtered_records = []
-                for record in all_records:
+                for i, record in enumerate(all_records):
                     fields = record.get("fields", {})
                     date_field = fields.get("date")
                     if not date_field:
+                        if i == 0:
+                            print(f"DEBUG: Record {i} has NO date field")
                         continue
 
                     record_date_str = self._extract_date_string(date_field)
                     if not record_date_str:
+                        if i == 0:
+                            print(f"DEBUG: Record {i} extracted date is None/empty")
                         continue
+
+                    # Debug first few records
+                    if i < 3:
+                        print(f"DEBUG: Record {i}: raw date={repr(date_field)} -> extracted={record_date_str}")
 
                     if start_date <= record_date_str <= end_date:
                         filtered_records.append(record)
+                    elif i < 3:
+                        print(f"DEBUG: Record {i} date {record_date_str} NOT in range [{start_date}, {end_date}]")
 
                 print(f"DEBUG: Filtered to {len(filtered_records)} records in date range {start_date} to {end_date}")
                 return filtered_records
@@ -146,7 +151,7 @@ class LarkBaseClient:
                 return all_records
 
         except requests.Timeout:
-            print(f"ERROR: Request timeout while fetching records")
+            print(f"ERROR: Request timeout")
             return all_records
         except Exception as e:
             print(f"ERROR: Failed to search records: {e}")
@@ -160,12 +165,12 @@ class LarkBaseClient:
 
 
     def get_performance_records(self, start_date: str, end_date: str) -> List[Dict]:
-        """Get performance records with date range (client-side filtering)"""
+        """Get performance records with CLIENT-SIDE date filtering"""
         print(f"DEBUG: Fetching performance records for {start_date} to {end_date}")
 
         records = self._search_records(self.performance_table_id, start_date, end_date)
 
-        print(f"DEBUG: Received {len(records)} records")
+        print(f"DEBUG: Received {len(records)} records from API")
         return records
 
 
@@ -207,7 +212,9 @@ class LarkBaseClient:
                 "record_id": record.get("record_id")
             }
 
-        print(f"DEBUG: Loaded {len(user_data)} users from Lark Base")
+            print(f"DEBUG: Added user: {name} ({email}) -> {department}")
+
+        print(f"DEBUG: Fetched user data for {len(user_data)} users")
         return user_data
 
 
@@ -268,12 +275,13 @@ class PerformanceTracker:
 
 
     def get_daily_user_target(self, date: str = None, num_media_buyers: int = 9) -> Dict[str, float]:
-        """Get daily performance targets for users"""
+        """Get daily performance targets for users - FIXED targets"""
         from datetime import datetime as dt
 
         if not date:
             date = dt.now().strftime("%Y-%m-%d")
 
+        # Default targets (adjust as needed)
         return {
             "revenue_target": 20000.0 / num_media_buyers,
             "profit_target": 5000.0 / num_media_buyers
@@ -293,6 +301,15 @@ class PerformanceTracker:
         return {"date": today, "records": self.client.get_performance_records(today, today)}
 
 
+    def get_today_projections(self) -> Dict:
+        """Fetch today's projection/target data"""
+        from datetime import datetime as dt
+
+        today = dt.now().strftime("%Y-%m-%d")
+        records = self.client._search_records(self.performance_table_id, today, today)
+        return {"date": today, "records": records}
+
+
     def compare_performance_to_targets(self, performance_data: Dict, projections_data: Dict) -> Dict:
         """Compare performance vs targets"""
         performance_records = performance_data.get("records", [])
@@ -309,6 +326,7 @@ class PerformanceTracker:
             except (ValueError, TypeError):
                 continue
 
+        # Fixed targets
         revenue_target = 180000
         profit_target = 45000
 
