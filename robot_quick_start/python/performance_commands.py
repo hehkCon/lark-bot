@@ -1,5 +1,5 @@
-# performance_commands.py - FINAL CORRECTED VERSION
-# Fixed: Use proper date ranges instead of just "today"
+# performance_commands.py - FIXED with EST timezone and robust email matching
+# Now handles Montreal EST timezone and fixes email extraction issues
 
 class PerformanceCommands:
     def __init__(self, performance_tracker, user_data: dict):
@@ -12,6 +12,64 @@ class PerformanceCommands:
         """
         self.tracker = performance_tracker
         self.user_data = user_data
+        
+        # Team mapping from Lark Base formula
+        self.team_mapping = {
+            "amanda.g@intentt.com": "Amanda's Team",
+            "jonas.f@intentt.com": "Amanda's Team",
+            "brent.l@intentt.com": "Amanda's Team",
+            "kath.g@intentt.com": "Kath's Team",
+            "angelika.m@intentt.com": "Kath's Team",
+            "dioulde.n@intentt.com": "Dioulde's Team",
+            "rachel.l@intentt.com": "Dioulde's Team",
+            "jello.c@intentt.com": "Jello's Team",
+            "job.c@intentt.com": "Kath's Team",
+        }
+    
+    
+    def _get_montreal_dates(self, date_range: str):
+        """
+        Calculate date range in Montreal EST timezone
+        
+        Args:
+            date_range: Date range string (e.g., "last 7 days", "today", "yesterday")
+        
+        Returns:
+            Tuple of (start_date, end_date) in YYYY-MM-DD format
+        """
+        from datetime import datetime, timedelta, timezone
+        
+        # Montreal EST timezone offset (UTC-5)
+        # Note: EST is used year-round for simplicity. In reality, EDT (UTC-4) is used in summer.
+        # For accurate timezone handling, consider using pytz library:
+        # import pytz
+        # montreal_tz = pytz.timezone('America/Toronto')
+        # now = datetime.now(montreal_tz)
+        
+        EST_OFFSET = timezone(timedelta(hours=-5))
+        now_montreal = datetime.now(EST_OFFSET)
+        today_montreal = now_montreal.strftime("%Y-%m-%d")
+        
+        print(f"DEBUG: Montreal time now: {now_montreal.strftime('%Y-%m-%d %H:%M:%S %Z')}")
+        print(f"DEBUG: Today in Montreal: {today_montreal}")
+        
+        if "yesterday" in date_range:
+            yesterday = (now_montreal - timedelta(days=1)).strftime("%Y-%m-%d")
+            return yesterday, yesterday
+        elif "mtd" in date_range:
+            month_start = now_montreal.replace(day=1).strftime("%Y-%m-%d")
+            return month_start, today_montreal
+        elif "last 30" in date_range:
+            start = (now_montreal - timedelta(days=30)).strftime("%Y-%m-%d")
+            return start, today_montreal
+        elif "last 14" in date_range:
+            start = (now_montreal - timedelta(days=14)).strftime("%Y-%m-%d")
+            return start, today_montreal
+        elif "today" in date_range:
+            return today_montreal, today_montreal
+        else:  # Default: last 7 days
+            start = (now_montreal - timedelta(days=7)).strftime("%Y-%m-%d")
+            return start, today_montreal
     
     
     def _find_user_by_email_or_name(self, target: str):
@@ -52,7 +110,7 @@ class PerformanceCommands:
         Get performance metrics for multiple users across date range
         
         Args:
-            emails: List of email addresses
+            emails: List of email addresses (lowercase)
             start_date: Start date (YYYY-MM-DD)
             end_date: End date (YYYY-MM-DD)
         
@@ -61,9 +119,17 @@ class PerformanceCommands:
         """
         records = self.tracker.client.get_performance_records(start_date, end_date)
         
+        # Normalize emails list to lowercase for matching
+        emails_lower = [e.lower() for e in emails]
+        
         perf_by_email = {}
-        for email in emails:
+        for email in emails_lower:
             perf_by_email[email] = {"revenue": 0, "spend": 0, "profit": 0, "days_with_data": 0}
+        
+        print(f"DEBUG: Looking for {len(emails_lower)} users in {len(records)} records")
+        print(f"DEBUG: Users to match: {emails_lower}")
+        
+        matched_count = 0
         
         # ✅ Using campaign_manager field with proper email extraction
         for record in records:
@@ -73,24 +139,29 @@ class PerformanceCommands:
             # Extract email using the client's helper method
             manager_email = self.tracker.client._extract_email_from_field(campaign_manager_field)
             
+            # ✅ CRITICAL FIX: Normalize to lowercase for matching
+            manager_email_lower = manager_email.lower() if manager_email else ""
+            
             # Skip records with no valid campaign_manager
-            if not manager_email:
+            if not manager_email_lower:
                 continue
             
             # Find if this email is in our list
-            if manager_email in emails:
+            if manager_email_lower in emails_lower:
+                matched_count += 1
                 try:
                     revenue = float(fields.get("revenue", 0) or 0)
                     spend = float(fields.get("spend", 0) or 0)
                     profit = float(fields.get("profit", 0) or 0)
                     
-                    perf_by_email[manager_email]["revenue"] += revenue
-                    perf_by_email[manager_email]["spend"] += spend
-                    perf_by_email[manager_email]["profit"] += profit
-                    perf_by_email[manager_email]["days_with_data"] += 1
+                    perf_by_email[manager_email_lower]["revenue"] += revenue
+                    perf_by_email[manager_email_lower]["spend"] += spend
+                    perf_by_email[manager_email_lower]["profit"] += profit
+                    perf_by_email[manager_email_lower]["days_with_data"] += 1
                 except (ValueError, TypeError):
                     continue
         
+        print(f"DEBUG: Matched {matched_count} records for {len([e for e in perf_by_email.values() if e['days_with_data'] > 0])} users")
         return perf_by_email
     
     
@@ -121,6 +192,8 @@ class PerformanceCommands:
 • `mtd` - Month-to-date
 • `today` - Today only
 
+⏰ All times in **Montreal EST**
+
 Type `perf help` anytime for this menu! 🚀"""
     
     
@@ -135,8 +208,6 @@ Type `perf help` anytime for this menu! 🚀"""
         Returns:
             Response message
         """
-        from datetime import datetime, timedelta
-        
         # Parse command
         parts = text.lower().strip().split()
         if not parts or parts[0] != "perf":
@@ -165,25 +236,8 @@ Type `perf help` anytime for this menu! 🚀"""
         else:
             search_target = " ".join(parts[1:]).strip() if len(parts) > 1 else None
         
-        # Calculate date range
-        today = datetime.now().strftime("%Y-%m-%d")
-        if "yesterday" in date_range:
-            yesterday = (datetime.now() - timedelta(days=1)).strftime("%Y-%m-%d")
-            start_date, end_date = yesterday, yesterday
-        elif "mtd" in date_range:
-            month_start = datetime.now().replace(day=1).strftime("%Y-%m-%d")
-            start_date, end_date = month_start, today
-        elif "last 30" in date_range:
-            start_date = (datetime.now() - timedelta(days=30)).strftime("%Y-%m-%d")
-            end_date = today
-        elif "last 14" in date_range:
-            start_date = (datetime.now() - timedelta(days=14)).strftime("%Y-%m-%d")
-            end_date = today
-        elif "today" in date_range:
-            start_date, end_date = today, today
-        else:  # Default: last 7 days
-            start_date = (datetime.now() - timedelta(days=7)).strftime("%Y-%m-%d")
-            end_date = today
+        # ✅ UPDATED: Use Montreal EST timezone
+        start_date, end_date = self._get_montreal_dates(date_range)
         
         print(f"DEBUG: Fetching performance data for {start_date} to {end_date}")
         
@@ -203,12 +257,15 @@ Type `perf help` anytime for this menu! 🚀"""
             
             # Check if they're a media buyer
             if "media_buying" in user_info.get("department", ""):
-                # ✅ FIXED: Use date range instead of just today
+                # ✅ Use date range with proper email normalization
                 perf = self._get_performance_batch([email], start_date, end_date)
                 
-                if email in perf and (perf[email]["revenue"] > 0 or perf[email]["spend"] > 0 or perf[email]["profit"] > 0):
+                # Normalize email for lookup
+                email_lower = email.lower()
+                
+                if email_lower in perf and (perf[email_lower]["revenue"] > 0 or perf[email_lower]["spend"] > 0 or perf[email_lower]["profit"] > 0):
                     # Calculate metrics from batch result
-                    metrics = perf[email]
+                    metrics = perf[email_lower]
                     total_revenue = metrics["revenue"]
                     total_spend = metrics["spend"]
                     total_profit = metrics["profit"]
@@ -216,7 +273,10 @@ Type `perf help` anytime for this menu! 🚀"""
                     
                     status = "✅" if roi >= 20 else "⚠️" if roi >= 10 else "❌"
                     
-                    message = f"""{status} **{user_info["name"]}'s Performance** ({start_date} to {end_date})
+                    # Include team name in response
+                    team_name = self.team_mapping.get(email_lower, "Unknown Team")
+                    
+                    message = f"""{status} **{user_info["name"]}** ({team_name}) - Performance ({start_date} to {end_date})
 
 Revenue: ${total_revenue:,.0f}
 Spend: ${total_spend:,.0f}
@@ -226,14 +286,22 @@ Days: {metrics["days_with_data"]}"""
                     
                     return message
                 else:
-                    return f"❌ No performance data for {user_info['name']} from {start_date} to {end_date}"
+                    # Better error message with troubleshooting hints
+                    return f"""❌ **{user_info['name']}** - No data found ({start_date} to {end_date})
+
+**Possible reasons:**
+• Data not uploaded yet for this period
+• Try: `perf {user_info['name'].lower()} last 14 days` to check if data exists
+• Or: `perf {user_info['name'].lower()} today` for today's data
+
+**All times in Montreal EST**"""
             
             # Non-media-buying user
             return f"❌ No performance data for {user_info['name']} in selected period"
     
     
     def _get_team_performance(self, start_date: str, end_date: str):
-        """Get all teams performance"""
+        """Get all teams performance with team names"""
         # Get all media buyers
         media_buyers = self._get_media_buyers_by_department()
         
@@ -243,16 +311,30 @@ Days: {metrics["days_with_data"]}"""
         emails = [email for email, _ in media_buyers]
         perf = self._get_performance_batch(emails, start_date, end_date)
         
-        total_rev = sum(p["revenue"] for p in perf.values())
-        total_spend = sum(p["spend"] for p in perf.values())
-        total_profit = sum(p["profit"] for p in perf.values())
-        roi = (total_profit / total_spend * 100) if total_spend > 0 else 0
+        # ✅ Organize by team
+        teams_data = {
+            "Amanda's Team": {"revenue": 0, "spend": 0, "profit": 0},
+            "Kath's Team": {"revenue": 0, "spend": 0, "profit": 0},
+            "Dioulde's Team": {"revenue": 0, "spend": 0, "profit": 0},
+            "Jello's Team": {"revenue": 0, "spend": 0, "profit": 0},
+        }
         
-        status = "✅" if total_profit > 0 else "⚠️"
+        for email, metrics in perf.items():
+            team_name = self.team_mapping.get(email, "Unknown Team")
+            if team_name in teams_data:
+                teams_data[team_name]["revenue"] += metrics["revenue"]
+                teams_data[team_name]["spend"] += metrics["spend"]
+                teams_data[team_name]["profit"] += metrics["profit"]
         
-        return f"""{status} **Team Performance** ({start_date} to {end_date})
-
-Revenue: ${total_rev:,.0f}
-Spend: ${total_spend:,.0f}
-Profit: ${total_profit:,.0f}
-ROI: {roi:.1f}%"""
+        # Build response
+        response = f"📊 **Team Performance Summary** ({start_date} to {end_date})\n\n"
+        
+        for team_name, data in teams_data.items():
+            roi = (data["profit"] / data["spend"] * 100) if data["spend"] > 0 else 0
+            status = "✅" if data["profit"] > 0 else "⚠️"
+            response += f"{status} **{team_name}**\n"
+            response += f"   Revenue: ${data['revenue']:,.0f} | Spend: ${data['spend']:,.0f} | Profit: ${data['profit']:,.0f} (ROI: {roi:.1f}%)\n\n"
+        
+        response += f"⏰ All times in Montreal EST"
+        
+        return response.strip()
