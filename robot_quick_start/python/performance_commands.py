@@ -40,7 +40,7 @@ class PerformanceCommands:
         Main handler for performance commands
         
         Args:
-            text: Command text (e.g., "perf jonas last 7 days" or "perf team amanda last 7 days")
+            text: Command text (e.g., "perf jonas last 7 days" or "perf team dioulde last 7 days")
             user_open_id: Lark user ID who sent command
         
         Returns:
@@ -364,11 +364,35 @@ class PerformanceCommands:
                 # Get performance for specific team
                 print(f"DEBUG: Fetching specific team '{team_name}' performance")
                 
-                # Find all users in this team
-                team_emails = [email for email, team in self.team_mapping.items() if team.lower() == team_name.lower()]
+                # ✅ FIXED: Match BOTH exact team name AND team leader name
+                # "perf team dioulde" matches "Dioulde's Team"
+                team_emails = []
+                actual_team_name = None
+                
+                # First try exact team name match
+                for email, team in self.team_mapping.items():
+                    if team.lower() == team_name.lower():
+                        team_emails.append(email)
+                        actual_team_name = team
+                        break
+                
+                # If no exact match, try leader name match (extract from "Dioulde's Team" → "dioulde")
+                if not team_emails:
+                    for email, team in self.team_mapping.items():
+                        # Extract leader name: "Dioulde's Team" → "dioulde"
+                        leader_name = team.split("'")[0].lower()
+                        if leader_name == team_name.lower():
+                            actual_team_name = team
+                            # Get ALL members of this team
+                            for e, t in self.team_mapping.items():
+                                if t == team:
+                                    team_emails.append(e)
+                            break
+                
+                print(f"DEBUG: Found {len(team_emails)} team members for '{team_name}' -> '{actual_team_name}'")
                 
                 if not team_emails:
-                    return f"❌ Team '{team_name}' not found"
+                    return f"❌ Team '{team_name}' not found. Try: amanda, kath, dioulde, jello"
                 
                 team_revenue = 0
                 team_spend = 0
@@ -380,89 +404,5 @@ class PerformanceCommands:
                     if email_lower in perf and perf[email_lower]["days_with_data"] > 0:
                         team_revenue += perf[email_lower]["revenue"]
                         team_spend += perf[email_lower]["spend"]
-                        team_profit += perf[email_lower]["profit"]
-                        team_members_with_data += 1
-                
-                if team_members_with_data == 0:
-                    return f"❌ No data found for team '{team_name}' between {start_date} and {end_date}"
-                
-                roi = (team_profit / team_spend * 100) if team_spend > 0 else 0
-                status = "✅" if team_profit >= 0 else "❌"
-                
-                return (
-                    f"{status} **{team_name}** - Performance ({start_date} to {end_date})\n"
-                    f"Revenue: ${team_revenue:,.0f}\n"
-                    f"Spend: ${team_spend:,.0f}\n"
-                    f"Profit: ${team_profit:,.0f}\n"
-                    f"ROI: {roi:.1f}%\n"
-                    f"Members with data: {team_members_with_data}"
-                )
-            
-            else:
-                # Get performance for all teams
-                print(f"DEBUG: Fetching all teams performance")
-                
-                # ✅ Organize by team
-                teams_data = {}
-                
-                for email, metrics in perf.items():
-                    team_name = self.team_mapping.get(email, "Unknown Team")
-                    if team_name not in teams_data:
-                        teams_data[team_name] = {"revenue": 0, "spend": 0, "profit": 0}
-                    
-                    if metrics["days_with_data"] > 0:
-                        teams_data[team_name]["revenue"] += metrics["revenue"]
-                        teams_data[team_name]["spend"] += metrics["spend"]
-                        teams_data[team_name]["profit"] += metrics["profit"]
-                
-                if not teams_data:
-                    return f"❌ No team data found between {start_date} and {end_date}"
-                
-                response = f"📊 **Team Performance Summary** ({start_date} to {end_date})\n\n"
-                
-                for team_name, data in sorted(teams_data.items()):
-                    roi = (data["profit"] / data["spend"] * 100) if data["spend"] > 0 else 0
-                    status = "✅" if data["profit"] > 0 else "❌"
-                    response += (
-                        f"{status} **{team_name}**\n"
-                        f"   Revenue: ${data['revenue']:,.0f} | Spend: ${data['spend']:,.0f} | "
-                        f"Profit: ${data['profit']:,.0f} (ROI: {roi:.1f}%)\n\n"
-                    )
-                
-                return response.strip()
-        
-        except Exception as e:
-            print(f"ERROR in _get_team_performance: {e}")
-            return f"❌ Error fetching team performance: {str(e)}"
-    
-    def _get_help_text(self):
-        """Return help text for performance commands"""
-        return (
-            "📊 **Performance Commands Help**\n\n"
-            "**Individual Performance:**\n"
-            "  `perf [name] [date_range]` - Get individual stats\n"
-            "  Examples:\n"
-            "    • perf amanda\n"
-            "    • perf jonas last 7 days\n"
-            "    • perf sarah yesterday\n\n"
-            "**Team Performance:**\n"
-            "  `perf team [name] [date_range]` - Get team stats\n"
-            "  Examples:\n"
-            "    • perf team amanda\n"
-            "    • perf team kath last 7 days\n"
-            "    • perf team last 30 days\n\n"
-            "**All Teams:**\n"
-            "  `perf team [date_range]` - Get all teams stats\n"
-            "  Examples:\n"
-            "    • perf team\n"
-            "    • perf team last 7 days\n"
-            "    • perf team mtd\n\n"
-            "**Date Ranges:**\n"
-            "  • `last X days` (default: 7)\n"
-            "  • `yesterday`\n"
-            "  • `today`\n"
-            "  • `mtd` (month to date)\n"
-            "  • `month` (last month)\n\n"
-            "⏰ All times in **Montreal EST**"
-        )
+                        team_profit += perf[email_lower]["
 

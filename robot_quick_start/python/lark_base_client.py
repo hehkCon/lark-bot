@@ -1,6 +1,9 @@
+# ================== lark_base_client.py ==================
+
 import requests
 import json
 from datetime import datetime, timedelta
+import pytz
 from typing import List, Dict, Any
 
 
@@ -14,6 +17,7 @@ class LarkBaseClient:
         self.headers = {
             "Content-Type": "application/json; charset=utf-8"
         }
+        self.montreal_tz = pytz.timezone('America/Toronto')
 
     def _get_headers(self):
         token = self.token_manager.get_token()
@@ -23,9 +27,11 @@ class LarkBaseClient:
 
     def _extract_date_string(self, date_field) -> str:
         """
-        ✅ FIXED: Extract date string from various formats
-        Handles: Unix timestamps (milliseconds), datetime objects, strings with/without time, arrays
-        Returns: YYYY-MM-DD format
+        ✅ FIXED: Extract date string handling timezone correctly
+        
+        Lark stores dates as ISO strings like "2025-11-02 00:00"
+        We extract just the YYYY-MM-DD part without timezone conversion
+        because Lark dates are already in the correct timezone
         """
         if not date_field:
             return None
@@ -36,28 +42,32 @@ class LarkBaseClient:
             if isinstance(date_field, dict):
                 date_field = date_field.get("text", "")
         
-        # ✅ CRITICAL FIX: Handle Unix timestamp in milliseconds
+        # Handle Unix timestamp in milliseconds (convert to Montreal time)
         if isinstance(date_field, (int, float)):
-            # Convert milliseconds to seconds
-            timestamp_seconds = date_field / 1000
-            dt = datetime.fromtimestamp(timestamp_seconds)
-            return dt.strftime("%Y-%m-%d")
+            try:
+                timestamp_seconds = date_field / 1000
+                # ✅ CRITICAL: Treat as UTC first, then convert to Montreal
+                dt_utc = datetime.utcfromtimestamp(timestamp_seconds)
+                dt_utc = pytz.UTC.localize(dt_utc)
+                dt_montreal = dt_utc.astimezone(self.montreal_tz)
+                return dt_montreal.strftime("%Y-%m-%d")
+            except (ValueError, OSError):
+                pass
         
-        # Convert to string
-        date_str = str(date_field)
+        # Handle string format (ISO string like "2025-11-02 00:00")
+        date_str = str(date_field).strip()
         
         # Extract just YYYY-MM-DD (first 10 chars)
         if len(date_str) >= 10:
-            return date_str[:10]
+            extracted = date_str[:10]
+            # Validate it's a date (basic check)
+            if extracted.count('-') == 2 and len(extracted.split('-')[0]) == 4:
+                return extracted
         
-        return date_str
+        return None
 
     def _extract_email_from_field(self, email_field) -> str:
-        """
-        ✅ FIXED: Extract email from various field formats
-        Handles: arrays with text objects, strings, None values
-        Returns: Email string or empty string
-        """
+        """Extract email from various field formats"""
         if not email_field:
             return ""
         
@@ -66,7 +76,6 @@ class LarkBaseClient:
             item = email_field[0]
             if isinstance(item, dict):
                 email = item.get("text", "").strip()
-                # Skip "-" or "missing" indicators
                 if email and email != "-":
                     return email.lower()
                 return ""
@@ -87,12 +96,7 @@ class LarkBaseClient:
 
     def _search_records(self, table_id: str, start_date: str = None, end_date: str = None, page_size: int = 500) -> List[Dict]:
         """
-        ✅ FIXED: Efficient pagination with COMPREHENSIVE date debugging
-        
-        IMPROVEMENTS:
-        - Stop when page records < page_size (natural end of pagination)
-        - Debug each record's date extraction
-        - Show which records are being filtered
+        Fetch records with client-side date filtering
         """
         url = f"{self.host}/open-apis/bitable/v1/apps/{self.app_token}/tables/{table_id}/records/search"
 
@@ -100,9 +104,8 @@ class LarkBaseClient:
         page_token = None
 
         try:
-            while True:  # Keep going until we're told to stop
+            while True:
                 payload = {"page_size": page_size}
-                
                 if page_token:
                     payload["page_token"] = page_token
                 
@@ -118,53 +121,46 @@ class LarkBaseClient:
                 page_records = data.get("data", {}).get("items", [])
                 all_records.extend(page_records)
 
-                print(f"DEBUG _search_records: Got {len(page_records)} records on this page")
+                print(f"DEBUG: Got {len(page_records)} records on this page")
 
-                # ✅ EFFICIENT: Stop when we get fewer records than requested
-                # This means we're at the last page
                 if len(page_records) < page_size:
                     print(f"DEBUG: Pagination complete. Total records: {len(all_records)}")
                     break
 
-                # ✅ Also check for page_token (API's official end signal)
                 page_token = data.get("data", {}).get("page_token")
                 if not page_token:
                     print(f"DEBUG: Pagination complete. Total records: {len(all_records)}")
                     break
 
-            # ✅ CLIENT-SIDE DATE FILTERING WITH DEBUG
+            # ✅ CLIENT-SIDE DATE FILTERING
             if start_date and end_date:
                 print(f"DEBUG: Filtering {len(all_records)} records for date range {start_date} to {end_date}")
                 filtered_records = []
-                excluded_dates = set()
                 included_dates = set()
+                excluded_dates = set()
                 
-                for i, record in enumerate(all_records):
+                for record in all_records:
                     fields = record.get("fields", {})
                     date_field = fields.get("date")
                     
                     if not date_field:
-                        print(f"  Record {i}: NO DATE FIELD - SKIPPING")
                         continue
 
                     record_date_str = self._extract_date_string(date_field)
                     
                     if not record_date_str:
-                        print(f"  Record {i}: date_field={date_field}, extracted=NONE - SKIPPING")
                         continue
 
-                    # ✅ CRITICAL: String comparison for dates (YYYY-MM-DD format)
+                    # ✅ String comparison works because YYYY-MM-DD format
                     if start_date <= record_date_str <= end_date:
                         filtered_records.append(record)
                         included_dates.add(record_date_str)
-                        print(f"  Record {i}: {record_date_str} ✅ INCLUDED")
                     else:
                         excluded_dates.add(record_date_str)
-                        print(f"  Record {i}: {record_date_str} ❌ EXCLUDED (outside range {start_date}-{end_date})")
 
                 print(f"DEBUG: Included dates: {sorted(included_dates)}")
                 print(f"DEBUG: Excluded dates: {sorted(excluded_dates)}")
-                print(f"DEBUG: Filtered to {len(filtered_records)} records in date range {start_date} to {end_date}")
+                print(f"DEBUG: Filtered to {len(filtered_records)} records in range {start_date} to {end_date}")
                 return filtered_records
             else:
                 return all_records
@@ -177,28 +173,22 @@ class LarkBaseClient:
             return all_records
 
     def get_user_records(self) -> List[Dict]:
-        """Get all user records (no date filter needed)"""
         print("DEBUG: Fetching user data...")
         return self._search_records(self.table_id)
 
     def get_performance_records(self, start_date: str, end_date: str) -> List[Dict]:
-        """Get performance records with CLIENT-SIDE date filtering"""
         print(f"DEBUG: Fetching performance records for {start_date} to {end_date}")
-
         records = self._search_records(self.performance_table_id, start_date, end_date)
-
         print(f"DEBUG: Received {len(records)} records from API")
         return records
 
     def get_user_data_dict(self) -> Dict[str, Dict]:
-        """Get user data as dictionary keyed by email"""
         records = self.get_user_records()
         user_data = {}
 
         for record in records:
             fields = record.get("fields", {})
 
-            # Extract email
             email_field = fields.get("email", [{}])
             email = ""
             if isinstance(email_field, list) and len(email_field) > 0:
@@ -209,22 +199,19 @@ class LarkBaseClient:
             if not email:
                 continue
 
-            # Extract name
             name_field = fields.get("name", [{}])
             name = name_field[0].get("text", "") if isinstance(name_field, list) and len(name_field) > 0 else ""
 
-            # Extract department
             dept_field = fields.get("department", [{}])
             department = dept_field[0].get("text", "") if isinstance(dept_field, list) and len(dept_field) > 0 else ""
 
-            # Extract lark_user_key
-            lark_user_key_field = fields.get("lark_user_key", [{}])
-            lark_user_key = lark_user_key_field[0].get("text", "") if isinstance(lark_user_key_field, list) and len(lark_user_key_field) > 0 else ""
+            lark_key_field = fields.get("lark_user_key", [{}])
+            lark_key = lark_key_field[0].get("text", "") if isinstance(lark_key_field, list) and len(lark_key_field) > 0 else ""
 
             user_data[email] = {
                 "name": name,
                 "department": department,
-                "lark_user_key": lark_user_key,
+                "lark_user_key": lark_key,
                 "record_id": record.get("record_id")
             }
 
@@ -240,9 +227,7 @@ class PerformanceTracker:
         self.performance_table_id = lark_client.performance_table_id
 
     def get_user_performance(self, email: str, date: str = None) -> Dict[str, float]:
-        """Get performance metrics for a specific user on a specific date"""
         from datetime import datetime as dt
-
         if not date:
             date = dt.now().strftime("%Y-%m-%d")
 
@@ -252,14 +237,11 @@ class PerformanceTracker:
         for record in records:
             fields = record.get("fields", {})
             campaign_manager_field = fields.get("campaign_manager", "")
-            
-            # ✅ FIXED: Use _extract_email_from_field to properly parse campaign_manager
             manager_email = self.client._extract_email_from_field(campaign_manager_field)
             
             if email.lower() == manager_email:
                 user_records.append(record)
 
-        # Sum across all records (all platforms for this user on this date)
         total_revenue = 0
         total_spend = 0
         total_profit = 0
@@ -286,41 +268,31 @@ class PerformanceTracker:
         }
 
     def get_daily_user_target(self, date: str = None, num_media_buyers: int = 9) -> Dict[str, float]:
-        """Get daily performance targets for users - FIXED targets"""
         from datetime import datetime as dt
-
         if not date:
             date = dt.now().strftime("%Y-%m-%d")
 
-        # Default targets (adjust as needed)
         return {
             "revenue_target": 20000.0 / num_media_buyers,
             "profit_target": 5000.0 / num_media_buyers
         }
 
     def get_user_data(self) -> Dict[str, Dict]:
-        """Get all user data from user info table"""
         return self.client.get_user_data_dict()
 
     def get_today_performance(self) -> Dict:
-        """Fetch today's performance data"""
         from datetime import datetime as dt
-
         today = dt.now().strftime("%Y-%m-%d")
         return {"date": today, "records": self.client.get_performance_records(today, today)}
 
     def get_today_projections(self) -> Dict:
-        """Fetch today's projection/target data"""
         from datetime import datetime as dt
-
         today = dt.now().strftime("%Y-%m-%d")
         records = self.client._search_records(self.performance_table_id, today, today)
         return {"date": today, "records": records}
 
     def compare_performance_to_targets(self, performance_data: Dict, projections_data: Dict) -> Dict:
-        """Compare performance vs targets"""
         performance_records = performance_data.get("records", [])
-        
         total_revenue = 0
         total_profit = 0
         
@@ -333,7 +305,6 @@ class PerformanceTracker:
             except (ValueError, TypeError):
                 continue
 
-        # Fixed targets
         revenue_target = 180000
         profit_target = 45000
 
@@ -347,23 +318,18 @@ class PerformanceTracker:
         }
 
     def generate_performance_message(self, team_name: str, comparison: Dict) -> str:
-        """Generate formatted team performance message"""
         revenue_pct = comparison.get("revenue_pct", 0)
         profit_pct = comparison.get("profit_pct", 0)
-
         status = "✅" if profit_pct >= 100 else "⚠️" if profit_pct >= 80 else "❌"
 
-        message = f"""{status} **{team_name} - Daily Performance**
+        return f"""{status} **{team_name} - Daily Performance**
 
 Revenue: ${comparison['total_revenue']:,.0f} / ${comparison['revenue_target']:,.0f} ({revenue_pct:.0f}%)
 Profit: ${comparison['total_profit']:,.0f} / ${comparison['profit_target']:,.0f} ({profit_pct:.0f}%)
 
 Keep up the great work! 🚀"""
 
-        return message
-
     def generate_user_performance_message(self, user_name: str, user_performance: Dict, user_targets: Dict) -> str:
-        """Generate personalized message for individual user"""
         revenue = user_performance.get("revenue", 0)
         profit = user_performance.get("profit", 0)
         roi = user_performance.get("roi", 0)
@@ -376,13 +342,11 @@ Keep up the great work! 🚀"""
 
         status = "✅" if profit_pct >= 100 else "⚠️" if profit_pct >= 80 else "❌"
 
-        message = f"""{status} **{user_name}'s Daily Performance**
+        return f"""{status} **{user_name}'s Daily Performance**
 
 Revenue: ${revenue:,.0f} / ${revenue_target:,.0f} ({revenue_pct:.0f}%)
 Profit: ${profit:,.0f} / ${profit_target:,.0f} ({profit_pct:.0f}%)
 ROI: {roi:.1f}%
 
 You've got this! 💪"""
-
-        return message
 
