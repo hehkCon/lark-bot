@@ -15,13 +15,11 @@ class LarkBaseClient:
             "Content-Type": "application/json; charset=utf-8"
         }
 
-
     def _get_headers(self):
         token = self.token_manager.get_token()
         headers = self.headers.copy()
         headers["Authorization"] = f"Bearer {token}"
         return headers
-
 
     def _extract_date_string(self, date_field) -> str:
         """
@@ -53,7 +51,6 @@ class LarkBaseClient:
             return date_str[:10]
         
         return date_str
-
 
     def _extract_email_from_field(self, email_field) -> str:
         """
@@ -88,15 +85,14 @@ class LarkBaseClient:
         
         return ""
 
-
     def _search_records(self, table_id: str, start_date: str = None, end_date: str = None, page_size: int = 500) -> List[Dict]:
         """
-        ✅ OPTIMIZED: Efficient pagination - stops early, minimal API calls
+        ✅ FIXED: Efficient pagination with COMPREHENSIVE date debugging
         
         IMPROVEMENTS:
         - Stop when page records < page_size (natural end of pagination)
-        - No arbitrary 100-page limit
-        - Simpler logic with while True loop
+        - Debug each record's date extraction
+        - Show which records are being filtered
         """
         url = f"{self.host}/open-apis/bitable/v1/apps/{self.app_token}/tables/{table_id}/records/search"
 
@@ -122,6 +118,8 @@ class LarkBaseClient:
                 page_records = data.get("data", {}).get("items", [])
                 all_records.extend(page_records)
 
+                print(f"DEBUG _search_records: Got {len(page_records)} records on this page")
+
                 # ✅ EFFICIENT: Stop when we get fewer records than requested
                 # This means we're at the last page
                 if len(page_records) < page_size:
@@ -134,23 +132,38 @@ class LarkBaseClient:
                     print(f"DEBUG: Pagination complete. Total records: {len(all_records)}")
                     break
 
-            # Client-side date filtering if date range provided
+            # ✅ CLIENT-SIDE DATE FILTERING WITH DEBUG
             if start_date and end_date:
                 print(f"DEBUG: Filtering {len(all_records)} records for date range {start_date} to {end_date}")
                 filtered_records = []
-                for record in all_records:
+                excluded_dates = set()
+                included_dates = set()
+                
+                for i, record in enumerate(all_records):
                     fields = record.get("fields", {})
                     date_field = fields.get("date")
+                    
                     if not date_field:
+                        print(f"  Record {i}: NO DATE FIELD - SKIPPING")
                         continue
 
                     record_date_str = self._extract_date_string(date_field)
+                    
                     if not record_date_str:
+                        print(f"  Record {i}: date_field={date_field}, extracted=NONE - SKIPPING")
                         continue
 
+                    # ✅ CRITICAL: String comparison for dates (YYYY-MM-DD format)
                     if start_date <= record_date_str <= end_date:
                         filtered_records.append(record)
+                        included_dates.add(record_date_str)
+                        print(f"  Record {i}: {record_date_str} ✅ INCLUDED")
+                    else:
+                        excluded_dates.add(record_date_str)
+                        print(f"  Record {i}: {record_date_str} ❌ EXCLUDED (outside range {start_date}-{end_date})")
 
+                print(f"DEBUG: Included dates: {sorted(included_dates)}")
+                print(f"DEBUG: Excluded dates: {sorted(excluded_dates)}")
                 print(f"DEBUG: Filtered to {len(filtered_records)} records in date range {start_date} to {end_date}")
                 return filtered_records
             else:
@@ -163,12 +176,10 @@ class LarkBaseClient:
             print(f"ERROR: Failed to search records: {e}")
             return all_records
 
-
     def get_user_records(self) -> List[Dict]:
         """Get all user records (no date filter needed)"""
         print("DEBUG: Fetching user data...")
         return self._search_records(self.table_id)
-
 
     def get_performance_records(self, start_date: str, end_date: str) -> List[Dict]:
         """Get performance records with CLIENT-SIDE date filtering"""
@@ -178,7 +189,6 @@ class LarkBaseClient:
 
         print(f"DEBUG: Received {len(records)} records from API")
         return records
-
 
     def get_user_data_dict(self) -> Dict[str, Dict]:
         """Get user data as dictionary keyed by email"""
@@ -229,7 +239,6 @@ class PerformanceTracker:
         self.client = lark_client
         self.performance_table_id = lark_client.performance_table_id
 
-
     def get_user_performance(self, email: str, date: str = None) -> Dict[str, float]:
         """Get performance metrics for a specific user on a specific date"""
         from datetime import datetime as dt
@@ -276,7 +285,6 @@ class PerformanceTracker:
             "roi": roi
         }
 
-
     def get_daily_user_target(self, date: str = None, num_media_buyers: int = 9) -> Dict[str, float]:
         """Get daily performance targets for users - FIXED targets"""
         from datetime import datetime as dt
@@ -290,11 +298,9 @@ class PerformanceTracker:
             "profit_target": 5000.0 / num_media_buyers
         }
 
-
     def get_user_data(self) -> Dict[str, Dict]:
         """Get all user data from user info table"""
         return self.client.get_user_data_dict()
-
 
     def get_today_performance(self) -> Dict:
         """Fetch today's performance data"""
@@ -303,7 +309,6 @@ class PerformanceTracker:
         today = dt.now().strftime("%Y-%m-%d")
         return {"date": today, "records": self.client.get_performance_records(today, today)}
 
-
     def get_today_projections(self) -> Dict:
         """Fetch today's projection/target data"""
         from datetime import datetime as dt
@@ -311,7 +316,6 @@ class PerformanceTracker:
         today = dt.now().strftime("%Y-%m-%d")
         records = self.client._search_records(self.performance_table_id, today, today)
         return {"date": today, "records": records}
-
 
     def compare_performance_to_targets(self, performance_data: Dict, projections_data: Dict) -> Dict:
         """Compare performance vs targets"""
@@ -342,7 +346,6 @@ class PerformanceTracker:
             "profit_pct": (total_profit / profit_target * 100) if profit_target > 0 else 0
         }
 
-
     def generate_performance_message(self, team_name: str, comparison: Dict) -> str:
         """Generate formatted team performance message"""
         revenue_pct = comparison.get("revenue_pct", 0)
@@ -358,7 +361,6 @@ Profit: ${comparison['total_profit']:,.0f} / ${comparison['profit_target']:,.0f}
 Keep up the great work! 🚀"""
 
         return message
-
 
     def generate_user_performance_message(self, user_name: str, user_performance: Dict, user_targets: Dict) -> str:
         """Generate personalized message for individual user"""
@@ -383,3 +385,4 @@ ROI: {roi:.1f}%
 You've got this! 💪"""
 
         return message
+
