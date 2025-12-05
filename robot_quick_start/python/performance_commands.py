@@ -1,9 +1,5 @@
-# CRITICAL FIX: Team command parsing and date tracking
-# This version fixes the index offset bug in team command detection
 
-# In handle_performance_command() method, REPLACE the entire parsing section:
-
-    def handle_performance_command(self, text: str, user_open_id: str):
+def handle_performance_command(self, text: str, user_open_id: str):
         """
         Main handler for performance commands
         
