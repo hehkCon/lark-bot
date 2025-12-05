@@ -10,14 +10,16 @@ import pytz
 class PerformanceCommands:
     """Handler for performance-related commands"""
     
-    def __init__(self, tracker):
+    def __init__(self, tracker, user_data=None):
         """
         Initialize PerformanceCommands handler
         
         Args:
             tracker: MeetingTracker instance for accessing data
+            user_data: Optional user data dictionary for caching
         """
         self.tracker = tracker
+        self.user_data = user_data or {}
         self.montreal_tz = pytz.timezone('America/Toronto')
     
     def handle_performance_command(self, text: str, user_open_id: str):
