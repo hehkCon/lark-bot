@@ -99,21 +99,21 @@ class PerformanceCommands:
         
         print(f"DEBUG: Fetching performance data for {start_date} to {end_date}")
         
-        # Handle different command types
+        # ✅ FIXED: Handle all 3 issues
         if not search_target or search_target == "help":
             return self._get_help_text()
         elif search_target == "me":
             return "❌ Can't determine your email. Contact admin to register."
-        elif search_target == "team" and not is_team_command:
-            # Show all team performance (perf team without name)
-            print(f"DEBUG: Showing all teams performance")
+        elif is_team_command and (not search_target or search_target.lower() == "none"):
+            # perf team → all teams
+            print("DEBUG: Showing ALL teams performance (perf team)")
             return self._get_team_performance(None, start_date, end_date)
         elif is_team_command:
-            # ✅ NEW: Handle "perf team [name]" command
+            # perf team [name] → specific leader's team
             print(f"DEBUG: Showing specific team '{search_target}' performance")
             return self._get_team_performance(search_target, start_date, end_date)
         else:
-            # Show individual performance
+            # Individual performance
             print(f"DEBUG: Showing individual '{search_target}' performance")
             return self._get_individual_performance(search_target, start_date, end_date)
     
@@ -202,7 +202,7 @@ class PerformanceCommands:
         """
         Get performance metrics for multiple users across date range
         
-        ✅ FIXED: Client-side filtering with proper email extraction
+        ✅ FIXED: Client-side filtering with proper email extraction + actual date tracking
         
         Args:
             emails: List of email addresses (lowercase)
@@ -220,7 +220,14 @@ class PerformanceCommands:
         
         perf_by_email = {}
         for email in emails_lower:
-            perf_by_email[email] = {"revenue": 0, "spend": 0, "profit": 0, "days_with_data": 0}
+            perf_by_email[email] = {
+                "revenue": 0, 
+                "spend": 0, 
+                "profit": 0, 
+                "days_with_data": 0,
+                "min_date": None,
+                "max_date": None
+            }
         
         print(f"DEBUG: Looking for {len(emails_lower)} users in {len(records)} records")
         print(f"DEBUG: Users to match: {emails_lower}")
@@ -254,6 +261,19 @@ class PerformanceCommands:
                     perf_by_email[manager_email_lower]["spend"] += spend
                     perf_by_email[manager_email_lower]["profit"] += profit
                     perf_by_email[manager_email_lower]["days_with_data"] += 1
+                    
+                    # ✅ NEW: Track actual min/max dates from records
+                    date_field = fields.get("date") or fields.get("Date") or fields.get("created_at")
+                    record_date = self.tracker.client._extract_date_string(date_field)
+                    
+                    if record_date:
+                        md = perf_by_email[manager_email_lower]["min_date"]
+                        xd = perf_by_email[manager_email_lower]["max_date"]
+                        if md is None or record_date < md:
+                            perf_by_email[manager_email_lower]["min_date"] = record_date
+                        if xd is None or record_date > xd:
+                            perf_by_email[manager_email_lower]["max_date"] = record_date
+                    
                 except (ValueError, TypeError):
                     continue
         
@@ -306,8 +326,12 @@ class PerformanceCommands:
             # Include team name in response
             team_name = self.team_mapping.get(email_lower, "Unknown Team")
             
+            # ✅ NEW: Use actual data dates instead of requested range
+            actual_start = metrics.get("min_date") or start_date
+            actual_end = metrics.get("max_date") or end_date
+            
             return (
-                f"{status} **{user_info['name']}** ({team_name}) - Performance ({start_date} to {end_date})\n"
+                f"{status} **{user_info['name']}** ({team_name}) - Performance ({actual_start} to {actual_end})\n"
                 f"Revenue: ${total_revenue:,.0f}\n"
                 f"Spend: ${total_spend:,.0f}\n"
                 f"Profit: ${total_profit:,.0f}\n"
@@ -342,19 +366,40 @@ class PerformanceCommands:
             perf = self._get_performance_batch(emails, start_date, end_date)
             
             if team_name:
-                # Get performance for specific team
+                # ✅ FIXED: Specific leader's team - resolve person → team
                 print(f"DEBUG: Fetching specific team '{team_name}' performance")
                 
-                # Find all users in this team
-                team_emails = [email for email, team in self.team_mapping.items() if team.lower() == team_name.lower()]
+                # 1) Resolve leader by name/email
+                leader_email, leader_info = self._find_user_by_email_or_name(team_name)
+                if not leader_email:
+                    return f"❌ Team leader '{team_name}' not found"
+                
+                leader_email_lower = leader_email.lower()
+                
+                # 2) Get the actual team name from mapping using leader's email
+                resolved_team_name = self.team_mapping.get(leader_email_lower)
+                if not resolved_team_name:
+                    return f"❌ Team for '{team_name}' not configured"
+                
+                print(f"DEBUG: Resolved leader '{team_name}' -> {leader_email_lower}, team '{resolved_team_name}'")
+                
+                # 3) Collect all emails in this resolved team
+                team_emails = [
+                    email for email, t in self.team_mapping.items()
+                    if t == resolved_team_name
+                ]
                 
                 if not team_emails:
-                    return f"❌ Team '{team_name}' not found"
+                    return f"❌ No members configured for {resolved_team_name}"
                 
                 team_revenue = 0
                 team_spend = 0
                 team_profit = 0
                 team_members_with_data = 0
+                
+                # ✅ NEW: Track actual team min/max dates
+                team_min_date = None
+                team_max_date = None
                 
                 for email in team_emails:
                     email_lower = email.lower()
@@ -363,15 +408,27 @@ class PerformanceCommands:
                         team_spend += perf[email_lower]["spend"]
                         team_profit += perf[email_lower]["profit"]
                         team_members_with_data += 1
+                        
+                        # Track min/max dates across team members
+                        md = perf[email_lower].get("min_date")
+                        xd = perf[email_lower].get("max_date")
+                        if md and (team_min_date is None or md < team_min_date):
+                            team_min_date = md
+                        if xd and (team_max_date is None or xd > team_max_date):
+                            team_max_date = xd
                 
                 if team_members_with_data == 0:
-                    return f"❌ No data found for team '{team_name}' between {start_date} and {end_date}"
+                    return f"❌ No data found for {resolved_team_name} between {start_date} and {end_date}"
                 
                 roi = (team_profit / team_spend * 100) if team_spend > 0 else 0
                 status = "✅" if team_profit >= 0 else "❌"
                 
+                # ✅ NEW: Use actual team data dates
+                actual_start = team_min_date or start_date
+                actual_end = team_max_date or end_date
+                
                 return (
-                    f"{status} **{team_name}** - Performance ({start_date} to {end_date})\n"
+                    f"{status} **{resolved_team_name}** - Performance ({actual_start} to {actual_end})\n"
                     f"Revenue: ${team_revenue:,.0f}\n"
                     f"Spend: ${team_spend:,.0f}\n"
                     f"Profit: ${team_profit:,.0f}\n"
@@ -399,7 +456,7 @@ class PerformanceCommands:
                 if not teams_data:
                     return f"❌ No team data found between {start_date} and {end_date}"
                 
-                response = f"📊 **Team Performance Summary** ({start_date} to {end_date})\n\n"
+                response = f"�� **Team Performance Summary** ({start_date} to {end_date})\n\n"
                 
                 for team_name, data in sorted(teams_data.items()):
                     roi = (data["profit"] / data["spend"] * 100) if data["spend"] > 0 else 0
@@ -446,3 +503,4 @@ class PerformanceCommands:
             "  • `month` (last month)\n\n"
             "⏰ All times in **Montreal EST**"
         )
+
