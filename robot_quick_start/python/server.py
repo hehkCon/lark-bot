@@ -336,13 +336,15 @@ Total Payment: ${result['payment']}"""
 
 
 
-I'm your BASE Media Buying Bot. Here's what I can do:
+I'm your Intentt Bot Assistant. Here's what I can do:
 
 
 
 **💰 Commission Calculator**
 • `Ginsu 5000 4000` - Calculate commission
 • `RSOC $3,000 $2,500` - Works with $ and commas!
+• `help` - See all commands
+
 
 
 
@@ -357,6 +359,7 @@ I'm your BASE Media Buying Bot. Here's what I can do:
 • `perf team` - All teams
 • `perf amanda` - Amanda's Team
 • `perf help` - See all commands
+- Please note that data is manually updated and can be delayed
 
 
 
