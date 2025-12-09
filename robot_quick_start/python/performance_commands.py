@@ -3,8 +3,10 @@ Performance Commands Handler for Lark Bot
 Handles all performance tracking queries (perf, perf team, etc.)
 """
 
+
 from datetime import datetime, timedelta
 import pytz
+
 
 
 class PerformanceCommands:
@@ -143,13 +145,20 @@ class PerformanceCommands:
                 parts = date_range_lower.split()
                 if len(parts) >= 2:
                     days = int(parts[1])
-                    start = today - timedelta(days=days-1)
-                    return start.isoformat(), today.isoformat()
+                    # ✅ FIXED: Calculate "last 7 days" = 7 days ago to yesterday (excluding today)
+                    end = today - timedelta(days=1)  # Yesterday
+                    start = end - timedelta(days=days-1)  # 7 days total
+                    # Add 1 to end_date for API query (includes all of last day)
+                    api_end = end + timedelta(days=1)
+                    return start.isoformat(), api_end.isoformat()
             except (ValueError, IndexError):
                 pass
         
-        start = today - timedelta(days=6)
-        return start.isoformat(), today.isoformat()
+        # ✅ FIXED: Default to last 7 days excluding today
+        end = today - timedelta(days=1)  # Yesterday
+        start = end - timedelta(days=6)  # 7 days total (including yesterday)
+        api_end = end + timedelta(days=1)  # For API
+        return start.isoformat(), api_end.isoformat()
     
     def _find_user_by_email_or_name(self, target: str):
         """
@@ -436,7 +445,7 @@ class PerformanceCommands:
             "    • perf team last 7 days\n"
             "    • perf team mtd\n\n"
             "**Date Ranges:**\n"
-            "  • `last X days` (default: 7)\n"
+            "  • `last X days` (default: 7, excludes today)\n"
             "  • `yesterday`\n"
             "  • `today`\n"
             "  • `mtd` (month to date)\n"
