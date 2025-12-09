@@ -317,7 +317,7 @@ class PerformanceCommands:
             
             team_name = self.team_mapping.get(email_lower, "Unknown Team")
             
-            # ✅ NEW: Use actual dates from data, not requested dates!
+            # ✅ FIXED: Use actual dates from data (no +1 day shift needed!)
             if actual_min_date and actual_max_date:
                 date_range_display = f"({actual_min_date} to {actual_max_date})"
             else:
@@ -409,7 +409,7 @@ class PerformanceCommands:
                 
                 display_team_name = actual_team_name or team_name
                 
-                # ✅ NEW: Use actual dates from data!
+                # ✅ FIXED: Use actual dates from data (no +1 day shift needed!)
                 if actual_min_date and actual_max_date:
                     date_range_display = f"({actual_min_date} to {actual_max_date})"
                 else:
@@ -442,7 +442,7 @@ class PerformanceCommands:
                 if not teams_data:
                     return f"❌ No team data found between {start_date} and {display_end_date}"
                 
-                # ✅ NEW: Use actual dates from data!
+                # ✅ FIXED: Use actual dates from data (no +1 day shift needed!)
                 if actual_min_date and actual_max_date:
                     date_range_display = f"({actual_min_date} to {actual_max_date})"
                 else:

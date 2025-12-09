@@ -56,9 +56,7 @@ class LarkBaseClient:
                 timestamp_seconds = date_field / 1000
                 # ✅ CRITICAL: Treat as UTC first, then convert to Montreal
                 dt_utc = datetime.utcfromtimestamp(timestamp_seconds)
-                dt_utc = pytz.UTC.localize(dt_utc)
-                dt_montreal = dt_utc.astimezone(self.montreal_tz)
-                return dt_montreal.strftime("%Y-%m-%d")
+                return dt_utc.strftime("%Y-%m-%d")
             except (ValueError, OSError):
                 pass
         
