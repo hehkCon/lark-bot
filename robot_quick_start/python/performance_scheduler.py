@@ -1,21 +1,29 @@
+# ================== performance_scheduler.py (FIXED) ==================
+# FIXES:
+# 1. ✅ Changed timezone from "US/Eastern" to "America/Toronto" (Montreal EST)
+# 2. ✅ Accepts performance_tracker parameter (uses singleton from server.py)
+# 3. ✅ Passes date explicitly to get_today_performance() and get_today_projections()
+# 4. ✅ Calculates date using Montreal timezone before passing to tracker
+
+
 import os
 import threading
 import time
 from datetime import datetime
 import pytz
 from api import MessageApiClient
-from lark_base_client import PerformanceTracker
+
 
 class PerformanceScheduler:
-    def __init__(self, message_api_client, performance_tracker, team_chat_mapping, timezone="US/Eastern"):
+    def __init__(self, message_api_client, performance_tracker, team_chat_mapping, timezone="America/Toronto"):
         """
-        Initialize the performance scheduler
+        ✅ FIXED: Initialize the performance scheduler with Montreal timezone
         
         Args:
             message_api_client: MessageApiClient instance for sending messages
             performance_tracker: PerformanceTracker instance for fetching data
             team_chat_mapping: Dict mapping team names to chat IDs
-            timezone: Timezone for scheduling (default: US/Eastern for EST)
+            timezone: Timezone for scheduling (default: America/Toronto for Montreal EST)
         """
         self.message_api_client = message_api_client
         self.performance_tracker = performance_tracker
@@ -24,6 +32,8 @@ class PerformanceScheduler:
         self.running = False
         self.scheduler_thread = None
         self.last_sent_date = None
+        
+        print(f"DEBUG: PerformanceScheduler initialized with timezone: {timezone}")
     
     def start(self):
         """Start the scheduler in a background thread"""
@@ -53,8 +63,8 @@ class PerformanceScheduler:
                 # 9:00 AM - 9:15 AM: Check every 3 minutes for 9:10 AM
                 if now.hour == 9 and 0 <= now.minute <= 15:
                     if now.minute == 10 and self.last_sent_date != today:
-                        print("DEBUG: Time is 9:10 AM EST - sending performance updates")
-                        self._send_all_team_updates()
+                        print("DEBUG: Time is 9:10 AM EST (Montreal) - sending performance updates")
+                        self._send_all_team_updates(today)
                         self.last_sent_date = today
                         
                         # Wait 65 seconds to avoid duplicate sends in the same minute
@@ -72,14 +82,26 @@ class PerformanceScheduler:
                 print(f"ERROR: Scheduler error: {e}")
                 time.sleep(7200)
     
-    def _send_all_team_updates(self):
-        """Fetch performance data and send to all teams"""
+    def _send_all_team_updates(self, date=None):
+        """
+        ✅ FIXED: Fetch performance data and send to all teams
+        
+        Args:
+            date: Date to fetch performance for (optional, defaults to today in Montreal)
+        """
         try:
-            print("DEBUG: Fetching performance data from Lark Base")
+            # ✅ FIXED: Calculate date in Montreal timezone
+            if not date:
+                now = datetime.now(self.timezone)
+                date = now.date()
             
-            # Fetch today's data
-            performance_data = self.performance_tracker.get_today_performance()
-            projections_data = self.performance_tracker.get_today_projections()
+            date_str = date.isoformat()  # Convert to "YYYY-MM-DD" format
+            
+            print(f"DEBUG: Fetching performance data from Lark Base for {date_str}")
+            
+            # ✅ FIXED: Pass date explicitly to tracker methods
+            performance_data = self.performance_tracker.get_today_performance(date_str)
+            projections_data = self.performance_tracker.get_today_projections(date_str)
             
             if not performance_data:
                 print("ERROR: No performance data available for today")
@@ -120,9 +142,14 @@ class PerformanceScheduler:
             print(f"ERROR: Failed to send performance updates: {e}")
 
 
-def initialize_performance_scheduler(message_api_client, token_manager, app_token, performance_table_id, projections_table_id):
+
+def initialize_performance_scheduler(message_api_client, performance_tracker):
     """
-    Initialize and start the performance scheduler
+    ✅ FIXED: Initialize and start the performance scheduler
+    
+    Args:
+        message_api_client: MessageApiClient instance
+        performance_tracker: PerformanceTracker instance (from server.py singleton)
     
     Call this from server.py during app startup
     """
@@ -134,24 +161,12 @@ def initialize_performance_scheduler(message_api_client, token_manager, app_toke
         "Jello's team": "oc_b017b223e054e80c14b5957bc77f8467"
     }
     
-    # Get tenant access token
-    tenant_token = token_manager.get_token()
-    
-    # Initialize performance tracker
-    performance_tracker = PerformanceTracker(
-        app_token=app_token,
-        performance_table_id=performance_table_id,
-        projections_table_id=projections_table_id,
-        tenant_access_token=tenant_token,
-        host="https://open.larksuite.com"
-    )
-    
-    # Initialize scheduler
+    # ✅ FIXED: Use existing performance_tracker instead of creating new one
     scheduler = PerformanceScheduler(
         message_api_client=message_api_client,
         performance_tracker=performance_tracker,
         team_chat_mapping=team_chat_mapping,
-        timezone="US/Eastern"  # EST
+        timezone="America/Toronto"  # ✅ FIXED: Montreal EST timezone
     )
     
     # Start scheduler
@@ -159,4 +174,3 @@ def initialize_performance_scheduler(message_api_client, token_manager, app_toke
     
     print("DEBUG: Performance scheduler initialized and started")
     return scheduler
-

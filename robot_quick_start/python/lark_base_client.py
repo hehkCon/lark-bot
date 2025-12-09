@@ -1,10 +1,16 @@
-# ================== lark_base_client.py ==================
+# ================== lark_base_client.py (FIXED) ==================
+# FIXES:
+# 1. get_user_performance() now accepts date parameter
+# 2. Uses Montreal timezone for date calculations
+# 3. Consistent with PerformanceTracker's other methods
+
 
 import requests
 import json
 from datetime import datetime, timedelta
 import pytz
 from typing import List, Dict, Any
+
 
 
 class LarkBaseClient:
@@ -19,11 +25,13 @@ class LarkBaseClient:
         }
         self.montreal_tz = pytz.timezone('America/Toronto')
 
+
     def _get_headers(self):
         token = self.token_manager.get_token()
         headers = self.headers.copy()
         headers["Authorization"] = f"Bearer {token}"
         return headers
+
 
     def _extract_date_string(self, date_field) -> str:
         """
@@ -66,6 +74,7 @@ class LarkBaseClient:
         
         return None
 
+
     def _extract_email_from_field(self, email_field) -> str:
         """Extract email from various field formats"""
         if not email_field:
@@ -94,14 +103,17 @@ class LarkBaseClient:
         
         return ""
 
+
     def _search_records(self, table_id: str, start_date: str = None, end_date: str = None, page_size: int = 500) -> List[Dict]:
         """
         Fetch records with client-side date filtering
         """
         url = f"{self.host}/open-apis/bitable/v1/apps/{self.app_token}/tables/{table_id}/records/search"
 
+
         all_records = []
         page_token = None
+
 
         try:
             while True:
@@ -112,25 +124,32 @@ class LarkBaseClient:
                 response = requests.post(url, headers=self._get_headers(), json=payload, timeout=10)
                 response.raise_for_status()
 
+
                 data = response.json()
+
 
                 if data.get("code") != 0:
                     print(f"ERROR: Lark API error: {data.get('msg', 'Unknown error')}")
                     return all_records
 
+
                 page_records = data.get("data", {}).get("items", [])
                 all_records.extend(page_records)
 
+
                 print(f"DEBUG: Got {len(page_records)} records on this page")
+
 
                 if len(page_records) < page_size:
                     print(f"DEBUG: Pagination complete. Total records: {len(all_records)}")
                     break
 
+
                 page_token = data.get("data", {}).get("page_token")
                 if not page_token:
                     print(f"DEBUG: Pagination complete. Total records: {len(all_records)}")
                     break
+
 
             # ✅ CLIENT-SIDE DATE FILTERING
             if start_date and end_date:
@@ -146,10 +165,12 @@ class LarkBaseClient:
                     if not date_field:
                         continue
 
+
                     record_date_str = self._extract_date_string(date_field)
                     
                     if not record_date_str:
                         continue
+
 
                     # ✅ String comparison works because YYYY-MM-DD format
                     if start_date <= record_date_str <= end_date:
@@ -158,12 +179,14 @@ class LarkBaseClient:
                     else:
                         excluded_dates.add(record_date_str)
 
+
                 print(f"DEBUG: Included dates: {sorted(included_dates)}")
                 print(f"DEBUG: Excluded dates: {sorted(excluded_dates)}")
                 print(f"DEBUG: Filtered to {len(filtered_records)} records in range {start_date} to {end_date}")
                 return filtered_records
             else:
                 return all_records
+
 
         except requests.Timeout:
             print(f"ERROR: Request timeout")
@@ -172,9 +195,11 @@ class LarkBaseClient:
             print(f"ERROR: Failed to search records: {e}")
             return all_records
 
+
     def get_user_records(self) -> List[Dict]:
         print("DEBUG: Fetching user data...")
         return self._search_records(self.table_id)
+
 
     def get_performance_records(self, start_date: str, end_date: str) -> List[Dict]:
         print(f"DEBUG: Fetching performance records for {start_date} to {end_date}")
@@ -182,12 +207,15 @@ class LarkBaseClient:
         print(f"DEBUG: Received {len(records)} records from API")
         return records
 
+
     def get_user_data_dict(self) -> Dict[str, Dict]:
         records = self.get_user_records()
         user_data = {}
 
+
         for record in records:
             fields = record.get("fields", {})
+
 
             email_field = fields.get("email", [{}])
             email = ""
@@ -196,17 +224,22 @@ class LarkBaseClient:
             elif isinstance(email_field, str):
                 email = email_field.lower()
 
+
             if not email:
                 continue
+
 
             name_field = fields.get("name", [{}])
             name = name_field[0].get("text", "") if isinstance(name_field, list) and len(name_field) > 0 else ""
 
+
             dept_field = fields.get("department", [{}])
             department = dept_field[0].get("text", "") if isinstance(dept_field, list) and len(dept_field) > 0 else ""
 
+
             lark_key_field = fields.get("lark_user_key", [{}])
             lark_key = lark_key_field[0].get("text", "") if isinstance(lark_key_field, list) and len(lark_key_field) > 0 else ""
+
 
             user_data[email] = {
                 "name": name,
@@ -215,10 +248,13 @@ class LarkBaseClient:
                 "record_id": record.get("record_id")
             }
 
+
             print(f"DEBUG: Added user: {name} ({email}) -> {department}")
+
 
         print(f"DEBUG: Fetched user data for {len(user_data)} users")
         return user_data
+
 
 
 class PerformanceTracker:
@@ -226,10 +262,26 @@ class PerformanceTracker:
         self.client = lark_client
         self.performance_table_id = lark_client.performance_table_id
 
+
     def get_user_performance(self, email: str, date: str = None) -> Dict[str, float]:
-        from datetime import datetime as dt
+        """
+        ✅ FIXED: Get performance metrics for a user on a specific date (Montreal timezone)
+        
+        Args:
+            email: User email (lowercase)
+            date: Date string in format "YYYY-MM-DD" (Montreal timezone)
+                  If None, uses today's date in Montreal timezone
+        
+        Returns:
+            Dict with revenue, spend, profit, roi
+        """
+        # ✅ FIXED: Use Montreal timezone instead of local machine time
         if not date:
-            date = dt.now().strftime("%Y-%m-%d")
+            now = datetime.now(self.client.montreal_tz)
+            date = now.strftime("%Y-%m-%d")
+        
+        print(f"DEBUG: Getting performance for {email} on {date} (Montreal time)")
+
 
         records = self.client.get_performance_records(date, date)
         user_records = []
@@ -241,6 +293,7 @@ class PerformanceTracker:
             
             if email.lower() == manager_email:
                 user_records.append(record)
+
 
         total_revenue = 0
         total_spend = 0
@@ -258,7 +311,9 @@ class PerformanceTracker:
             except (ValueError, TypeError):
                 continue
 
+
         roi = (total_profit / total_spend * 100) if total_spend > 0 else 0
+
 
         return {
             "revenue": total_revenue,
@@ -267,29 +322,64 @@ class PerformanceTracker:
             "roi": roi
         }
 
-    def get_daily_user_target(self, date: str = None, num_media_buyers: int = 9) -> Dict[str, float]:
-        from datetime import datetime as dt
-        if not date:
-            date = dt.now().strftime("%Y-%m-%d")
 
+    def get_daily_user_target(self, date: str = None, num_media_buyers: int = 9) -> Dict[str, float]:
+        """
+        ✅ FIXED: Get daily targets for a user (with optional date parameter)
+        
+        Args:
+            date: Date string (for consistency, though targets don't change by date)
+            num_media_buyers: Number of media buyers to divide targets by
+        
+        Returns:
+            Dict with revenue_target and profit_target
+        """
         return {
             "revenue_target": 20000.0 / num_media_buyers,
             "profit_target": 5000.0 / num_media_buyers
         }
 
+
     def get_user_data(self) -> Dict[str, Dict]:
         return self.client.get_user_data_dict()
 
-    def get_today_performance(self) -> Dict:
-        from datetime import datetime as dt
-        today = dt.now().strftime("%Y-%m-%d")
-        return {"date": today, "records": self.client.get_performance_records(today, today)}
 
-    def get_today_projections(self) -> Dict:
-        from datetime import datetime as dt
-        today = dt.now().strftime("%Y-%m-%d")
-        records = self.client._search_records(self.performance_table_id, today, today)
-        return {"date": today, "records": records}
+    def get_today_performance(self, date: str = None) -> Dict:
+        """
+        ✅ FIXED: Get today's performance (with optional date parameter for Montreal timezone)
+        
+        Args:
+            date: Date string in format "YYYY-MM-DD" (Montreal timezone)
+                  If None, uses today's date in Montreal timezone
+        
+        Returns:
+            Dict with date and records
+        """
+        if not date:
+            now = datetime.now(self.client.montreal_tz)
+            date = now.strftime("%Y-%m-%d")
+        
+        return {"date": date, "records": self.client.get_performance_records(date, date)}
+
+
+    def get_today_projections(self, date: str = None) -> Dict:
+        """
+        ✅ FIXED: Get today's projections (with optional date parameter for Montreal timezone)
+        
+        Args:
+            date: Date string in format "YYYY-MM-DD" (Montreal timezone)
+                  If None, uses today's date in Montreal timezone
+        
+        Returns:
+            Dict with date and records
+        """
+        if not date:
+            now = datetime.now(self.client.montreal_tz)
+            date = now.strftime("%Y-%m-%d")
+        
+        records = self.client._search_records(self.performance_table_id, date, date)
+        return {"date": date, "records": records}
+
 
     def compare_performance_to_targets(self, performance_data: Dict, projections_data: Dict) -> Dict:
         performance_records = performance_data.get("records", [])
@@ -305,8 +395,10 @@ class PerformanceTracker:
             except (ValueError, TypeError):
                 continue
 
+
         revenue_target = 180000
         profit_target = 45000
+
 
         return {
             "total_revenue": total_revenue,
@@ -317,36 +409,46 @@ class PerformanceTracker:
             "profit_pct": (total_profit / profit_target * 100) if profit_target > 0 else 0
         }
 
+
     def generate_performance_message(self, team_name: str, comparison: Dict) -> str:
         revenue_pct = comparison.get("revenue_pct", 0)
         profit_pct = comparison.get("profit_pct", 0)
         status = "✅" if profit_pct >= 100 else "⚠️" if profit_pct >= 80 else "❌"
 
+
         return f"""{status} **{team_name} - Daily Performance**
+
 
 Revenue: ${comparison['total_revenue']:,.0f} / ${comparison['revenue_target']:,.0f} ({revenue_pct:.0f}%)
 Profit: ${comparison['total_profit']:,.0f} / ${comparison['profit_target']:,.0f} ({profit_pct:.0f}%)
 
+
 Keep up the great work! 🚀"""
+
 
     def generate_user_performance_message(self, user_name: str, user_performance: Dict, user_targets: Dict) -> str:
         revenue = user_performance.get("revenue", 0)
         profit = user_performance.get("profit", 0)
         roi = user_performance.get("roi", 0)
 
+
         revenue_target = user_targets.get("revenue_target", 20000)
         profit_target = user_targets.get("profit_target", 5000)
+
 
         revenue_pct = (revenue / revenue_target * 100) if revenue_target > 0 else 0
         profit_pct = (profit / profit_target * 100) if profit_target > 0 else 0
 
+
         status = "✅" if profit_pct >= 100 else "⚠️" if profit_pct >= 80 else "❌"
 
+
         return f"""{status} **{user_name}'s Daily Performance**
+
 
 Revenue: ${revenue:,.0f} / ${revenue_target:,.0f} ({revenue_pct:.0f}%)
 Profit: ${profit:,.0f} / ${profit_target:,.0f} ({profit_pct:.0f}%)
 ROI: {roi:.1f}%
 
-You've got this! 💪"""
 
+You've got this! 💪"""
