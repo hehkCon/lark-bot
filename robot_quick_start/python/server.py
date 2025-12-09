@@ -1,14 +1,21 @@
+# ✅ server.py - UPDATED WITH SCHEDULER INTEGRATION
+# Add this to your existing server.py
+
 import json
 import logging
 import os
 import threading
-import time  # ✅ ADD THIS IMPORT
+import time  
 from flask import Flask, jsonify, request
 from api import MessageApiClient, TokenManager
 from lark_base_client import LarkBaseClient, PerformanceTracker
 from performance_commands import PerformanceCommands
 from commission import calculate_commission, get_help_message
 from creative_tracker import parse_creative_command, count_creatives_by_creator, count_creatives_by_language, get_creative_help
+
+# ✅ NEW IMPORTS FOR SCHEDULERS
+from performance_scheduler import PerformanceScheduler
+from user_performance_scheduler import UserPerformanceScheduler
 
 
 # Load environment variables
@@ -17,7 +24,7 @@ APP_SECRET = os.getenv("APP_SECRET")
 VERIFICATION_TOKEN = os.getenv("VERIFICATION_TOKEN", "")
 LARK_HOST = os.getenv("LARK_HOST", "https://open.larksuite.com")
 LARK_BASE_APP_TOKEN = os.getenv("LARK_BASE_APP_TOKEN")
-LARK_BASE_COMBINED_PERFORMANCE_TABLE_ID = os.getenv("LARK_BASE_COMBINED_PERFORMANCE_TABLE_ID")  # ✅ CHANGED
+LARK_BASE_COMBINED_PERFORMANCE_TABLE_ID = os.getenv("LARK_BASE_COMBINED_PERFORMANCE_TABLE_ID")
 LARK_BASE_USER_INFO_TABLE_ID = os.getenv("LARK_BASE_USER_INFO_TABLE_ID")
 
 
@@ -32,7 +39,7 @@ print(f"DEBUG: APP_SECRET={'SET' if APP_SECRET else 'NOT SET'}")
 print(f"DEBUG: LARK_HOST={LARK_HOST}")
 print(f"DEBUG: LARK_BASE_APP_TOKEN={'SET' if LARK_BASE_APP_TOKEN else 'MISSING'}")
 print(f"DEBUG: LARK_BASE_USER_INFO_TABLE_ID={LARK_BASE_USER_INFO_TABLE_ID}")
-print(f"DEBUG: LARK_BASE_COMBINED_PERFORMANCE_TABLE_ID={LARK_BASE_COMBINED_PERFORMANCE_TABLE_ID}")  # ✅ CHANGED
+print(f"DEBUG: LARK_BASE_COMBINED_PERFORMANCE_TABLE_ID={LARK_BASE_COMBINED_PERFORMANCE_TABLE_ID}")
 print(f"DEBUG: PORT={PORT}, DEBUG={DEBUG}")
 
 
@@ -44,12 +51,16 @@ token_manager = TokenManager(APP_ID, APP_SECRET, LARK_HOST)
 message_api_client = MessageApiClient(APP_ID, APP_SECRET, token_manager)
 
 
-# GLOBAL SINGLETONS - Initialize once at startup (FIXES inefficient reinitialization)
+# GLOBAL SINGLETONS - Initialize once at startup
 performance_tracker_instance = None
 user_data_cache = None
 
+# ✅ NEW: Global scheduler instances
+performance_scheduler_instance = None
+user_performance_scheduler_instance = None
 
-# Thread-safe duplicate event processing (FIXES race condition)
+
+# Thread-safe duplicate event processing
 processed_events = set()
 processed_events_lock = threading.Lock()
 
@@ -63,14 +74,15 @@ def handle_exception(e):
 def init_trackers():
     """Initialize performance tracker ONCE at startup (CRITICAL FIX)"""
     global performance_tracker_instance, user_data_cache
+    global performance_scheduler_instance, user_performance_scheduler_instance
     
     try:
         # Pass token_manager instead of static token (FIXES stale token bug)
         lark_client = LarkBaseClient(
             app_token=LARK_BASE_APP_TOKEN,
             table_id=LARK_BASE_USER_INFO_TABLE_ID,
-            performance_table_id=LARK_BASE_COMBINED_PERFORMANCE_TABLE_ID,  # ✅ CHANGED: Use combined table
-            token_manager=token_manager  # ✅ FIXED: Always fresh token
+            performance_table_id=LARK_BASE_COMBINED_PERFORMANCE_TABLE_ID,
+            token_manager=token_manager  # Always fresh token
         )
         performance_tracker_instance = PerformanceTracker(lark_client=lark_client)
         
@@ -85,9 +97,54 @@ def init_trackers():
         print("✅ DEBUG: Token manager integrated - no more stale tokens!")
         print(f"✅ DEBUG: Using combined performance table: {LARK_BASE_COMBINED_PERFORMANCE_TABLE_ID}")
         
+        # ✅ NEW: Initialize schedulers
+        init_schedulers()
+        
     except Exception as e:
         print(f"❌ ERROR: Failed to initialize trackers: {e}")
         performance_tracker_instance = None
+
+
+def init_schedulers():
+    """✅ NEW: Initialize and start performance schedulers"""
+    global performance_scheduler_instance, user_performance_scheduler_instance
+    
+    try:
+        if performance_tracker_instance is None:
+            print("⚠️ WARNING: Cannot initialize schedulers - performance_tracker_instance is None")
+            return
+        
+        # Team to chat ID mapping
+        team_chat_mapping = {
+            "Dioulde's team": "oc_fdb7932f2822ba72af2097415bd9950f",
+            "Kath's team": "oc_adf04e6adc2205c661e177354abad176",
+            "Amanda's team": "oc_2baefe6e05e47f00b376c33e5d938101",
+            "Jello's team": "oc_b017b223e054e80c14b5957bc77f8467"
+        }
+        
+        # ✅ Team performance scheduler (sends at 9:10 AM EST)
+        performance_scheduler_instance = PerformanceScheduler(
+            message_api_client=message_api_client,
+            performance_tracker=performance_tracker_instance,
+            team_chat_mapping=team_chat_mapping,
+            timezone="America/Toronto"  # Montreal EST
+        )
+        performance_scheduler_instance.start()
+        print("✅ DEBUG: Team performance scheduler started (9:10 AM EST)")
+        
+        # ✅ User performance scheduler (sends at 9:50 AM EST)
+        user_performance_scheduler_instance = UserPerformanceScheduler(
+            message_api_client=message_api_client,
+            performance_tracker=performance_tracker_instance,
+            timezone="America/Toronto"  # Montreal EST
+        )
+        user_performance_scheduler_instance.start()
+        print("✅ DEBUG: User performance scheduler started (9:50 AM EST)")
+        
+    except Exception as e:
+        print(f"❌ ERROR: Failed to initialize schedulers: {e}")
+        import traceback
+        print(f"Traceback: {traceback.format_exc()}")
 
 
 @app.route("/", methods=["GET", "POST"])
@@ -108,7 +165,7 @@ def callback_event_handler():
         return jsonify({"challenge": challenge})
 
 
-    # ✅ FIXED: THREAD-SAFE duplicate event processing
+    # FIXED: THREAD-SAFE duplicate event processing
     event_id = req_data.get("header", {}).get("event_id")
     with processed_events_lock:
         if event_id in processed_events:
@@ -170,7 +227,7 @@ def callback_event_handler():
         text_lower = text.lower()
 
 
-        # ✅ FIXED: Use GLOBAL singleton (no more reinitialization per command)
+        # FIXED: Use GLOBAL singleton (no more reinitialization per command)
         if performance_tracker_instance is None:
             print("⚠️ WARNING: Performance tracker not initialized - run /healthcheck")
             response_text = "❌ Bot services not ready. Please wait 30 seconds and try again."
@@ -179,7 +236,7 @@ def callback_event_handler():
             if text_lower == "perf help":
                 try:
                     # Use cached user data
-                    current_time = time.time()  # ✅ time module imported
+                    current_time = time.time()
                     if (not user_data_cache["data"] or 
                         current_time > user_data_cache["expiry"]):
                         print("DEBUG: Refreshing user data cache")
@@ -198,7 +255,7 @@ def callback_event_handler():
             elif text_lower.startswith("perf"):
                 try:
                     # Use cached user data
-                    current_time = time.time()  # ✅ time module imported
+                    current_time = time.time()
                     if (not user_data_cache["data"] or 
                         current_time > user_data_cache["expiry"]):
                         print("DEBUG: Refreshing user data cache")
@@ -267,7 +324,9 @@ def callback_event_handler():
                 response_text = """👋 **Hello!**
 
 
+
 I'm your BASE Media Buying Bot. Here's what I can do:
+
 
 
 **💰 Commission Calculator**
@@ -275,9 +334,11 @@ I'm your BASE Media Buying Bot. Here's what I can do:
 • `RSOC $3,000 $2,500` - Works with $ and commas!
 
 
+
 **🎨 Creative Tracker**
 • `creative count Alejandra this month` - Track creatives
 • `creative help` - See all commands
+
 
 
 **📈 Performance Tracker**
@@ -285,6 +346,7 @@ I'm your BASE Media Buying Bot. Here's what I can do:
 • `perf team` - All teams
 • `perf amanda` - Amanda's Team
 • `perf help` - See all commands
+
 
 
 Type any command to get started! 🚀"""
@@ -323,6 +385,8 @@ def healthcheck():
     return jsonify({
         "status": "healthy",
         "performance_tracker": performance_tracker_instance is not None,
+        "performance_scheduler": performance_scheduler_instance is not None,
+        "user_scheduler": user_performance_scheduler_instance is not None,
         "message_client": message_api_client is not None,
         "token_manager": token_manager.token is not None
     })
@@ -335,10 +399,28 @@ def meegle_webhook_handler():
     return jsonify({"message": "received"}), 200
 
 
-# Initialize trackers at startup
+# ✅ NEW: Shutdown gracefully
+def shutdown_schedulers():
+    """Gracefully stop schedulers on shutdown"""
+    global performance_scheduler_instance, user_performance_scheduler_instance
+    
+    if performance_scheduler_instance:
+        performance_scheduler_instance.stop()
+        print("DEBUG: Team performance scheduler stopped")
+    
+    if user_performance_scheduler_instance:
+        user_performance_scheduler_instance.stop()
+        print("DEBUG: User performance scheduler stopped")
+
+
+# Initialize trackers and schedulers at startup
 with app.app_context():
     init_trackers()
 
 
 if __name__ == "__main__":
-    app.run(host="0.0.0.0", port=PORT, debug=DEBUG)
+    try:
+        app.run(host="0.0.0.0", port=PORT, debug=DEBUG)
+    except KeyboardInterrupt:
+        print("\nShutting down...")
+        shutdown_schedulers()
