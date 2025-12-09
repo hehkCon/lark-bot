@@ -11,7 +11,7 @@ from api import MessageApiClient, TokenManager
 from lark_base_client import LarkBaseClient, PerformanceTracker
 from performance_commands import PerformanceCommands
 from commission import calculate_commission, get_help_message
-from creative_tracker import parse_creative_command, count_creatives_by_creator, count_creatives_by_language, get_creative_help
+from creative_tracker import parse_creative_command, count_creatives_by_creator, get_creator_count_and_payment, count_creatives_by_language, get_creative_help
 
 # ✅ NEW IMPORTS FOR SCHEDULERS
 from performance_scheduler import PerformanceScheduler
@@ -313,10 +313,21 @@ def callback_event_handler():
                     response_text = count_creatives_by_creator(
                         parsed["creator"], parsed["time_period"], lark_user_id=user_open_id
                     )
+                elif parsed["type"] == "payment":
+                    result = get_creator_count_and_payment(
+                        parsed["creator"], parsed["time_period"], lark_user_id=user_open_id
+                    )
+                    if result["success"]:
+                        response_text = f"""✅ **{result['creator']}** - Creative Payment ({result['period']})
+Videos: {result['count']}
+Total Payment: ${result['payment']}"""
+                    else:
+                        response_text = result["error"]
                 elif parsed["type"] == "language":
                     response_text = count_creatives_by_language(parsed["language"], parsed["time_period"])
                 else:
                     response_text = "❌ Unknown creative command"
+                    
 
 
             # Unknown command fallback

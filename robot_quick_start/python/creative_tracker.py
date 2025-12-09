@@ -1,7 +1,10 @@
+# creative_tracker.py - UPDATED WITH PAYMENT FEATURE
+
 import re
 from datetime import datetime
 from calendar import monthrange
 from meegle_api import MeegleClient
+
 
 # User ID mapping for content creators
 CREATOR_USER_IDS = {
@@ -10,6 +13,10 @@ CREATOR_USER_IDS = {
     "alejandra": "7566221514945662485",
     "7562186989836045843": "7562186989836045843",
 }
+
+# Payment rate per video (in dollars)
+PAYMENT_PER_VIDEO = 12
+
 
 def parse_creative_command(text):
     text_lower = text.lower().strip()
@@ -27,11 +34,16 @@ def parse_creative_command(text):
         creator_name = parts[2]
         time_period = " ".join(parts[3:]) if len(parts) > 3 else "this month"
         return {"type": command_type, "creator": creator_name, "time_period": time_period}
+    elif command_type == "payment":
+        creator_name = parts[2]
+        time_period = " ".join(parts[3:]) if len(parts) > 3 else "this month"
+        return {"type": "payment", "creator": creator_name, "time_period": time_period}
     elif command_type == "language":
         language = parts[2]
         time_period = " ".join(parts[3:]) if len(parts) > 3 else "this month"
         return {"type": "language", "language": language, "time_period": time_period}
     return {"error": f"Unknown creative command: {command_type}. Type 'creative help' for usage."}
+
 
 def parse_time_period(time_period_str):
     now = datetime.now()
@@ -41,7 +53,7 @@ def parse_time_period(time_period_str):
         last_day = monthrange(now.year, now.month)[1]
         end_date = datetime(now.year, now.month, last_day, 23, 59, 59)
         period_name = now.strftime("%B %Y")
-    elif "last month" in time_lower:
+    elif "last month" in time_lower or "month" in time_lower and "this" not in time_lower:
         if now.month == 1:
             month, year = 12, now.year - 1
         else:
@@ -74,7 +86,9 @@ def parse_time_period(time_period_str):
             period_name = now.strftime("%B %Y")
     return start_date, end_date, period_name
 
+
 def count_creatives_by_creator(creator_name, time_period_str, lark_user_id=None):
+    """Returns formatted response with creative count (original function)"""
     client = MeegleClient()
     start_date, end_date, period_name = parse_time_period(time_period_str)
     start_timestamp = int(start_date.timestamp() * 1000)
@@ -154,6 +168,94 @@ Current statuses:
         print(f"Traceback: {traceback.format_exc()}")
         return f"❌ Error fetching creative data: {str(e)}"
 
+
+def get_creator_count_and_payment(creator_name, time_period_str, lark_user_id=None):
+    """Returns dict with creator count and payment calculation"""
+    client = MeegleClient()
+    start_date, end_date, period_name = parse_time_period(time_period_str)
+    start_timestamp = int(start_date.timestamp() * 1000)
+    end_timestamp = int(end_date.timestamp() * 1000)
+    
+    print(f"DEBUG: Payment calculation - Period: {period_name}")
+    print(f"DEBUG: Start timestamp: {start_timestamp}, End timestamp: {end_timestamp}")
+    
+    if creator_name.lower() in ["me", "i"]:
+        creator_name = get_meegle_username_from_lark(lark_user_id)
+        if not creator_name:
+            return {
+                "success": False,
+                "error": "❌ Could not find your Meegle username. Please use your Meegle name instead."
+            }
+    
+    creator_lookup = creator_name.lower()
+    creator_user_id = CREATOR_USER_IDS.get(creator_lookup)
+    
+    if not creator_user_id:
+        known_creators = ', '.join([k.title() for k in CREATOR_USER_IDS.keys() if not k.isdigit()])
+        return {
+            "success": False,
+            "error": f"❌ Could not find user ID for '{creator_name}'. Known creators: {known_creators}"
+        }
+    
+    print(f"DEBUG: Searching for creator '{creator_name}' with user_id: {creator_user_id}")
+    
+    try:
+        result = client.search_work_items(filters=None)
+        all_items = result.get("data", [])
+        print(f"DEBUG: Got {len(all_items)} total work items")
+        
+        filtered_items = []
+        for item in all_items:
+            item_id = item.get('id')
+            fields = item.get("fields", [])
+            creator_matched = False
+            
+            # Check if creator matches
+            for field in fields:
+                if field.get("field_alias") == "content_creator":
+                    creator_value = str(field.get("field_value", ""))
+                    if creator_user_id == creator_value:
+                        creator_matched = True
+                        break
+            
+            if not creator_matched:
+                continue
+            
+            # Check if Creative Production exit is in the time period
+            state_times = item.get("state_times", [])
+            for state in state_times:
+                state_name = state.get("name", "")
+                end_time = state.get("end_time", 0)
+                
+                if state_name == "Creative Production" and end_time > 0:
+                    if start_timestamp <= end_time <= end_timestamp:
+                        filtered_items.append(item)
+                        print(f"DEBUG: ✅ Item {item_id} counted for payment")
+                        break
+        
+        count = len(filtered_items)
+        payment = count * PAYMENT_PER_VIDEO
+        
+        print(f"DEBUG: Final count: {count}, Payment: ${payment}")
+        
+        return {
+            "success": True,
+            "creator": creator_name.title(),
+            "period": period_name,
+            "count": count,
+            "payment": payment
+        }
+        
+    except Exception as e:
+        import traceback
+        print(f"ERROR: Meegle API error: {e}")
+        print(f"Traceback: {traceback.format_exc()}")
+        return {
+            "success": False,
+            "error": f"❌ Error fetching creative data: {str(e)}"
+        }
+
+
 def count_creatives_by_language(language, time_period_str):
     client = MeegleClient()
     start_date, end_date, period_name = parse_time_period(time_period_str)
@@ -181,11 +283,13 @@ Total Creatives: {len(filtered_items)}"""
         print(f"Traceback: {traceback.format_exc()}")
         return f"❌ Error fetching creative data: {str(e)}"
 
+
 def get_meegle_username_from_lark(lark_user_id):
     user_mapping = {
         "ou_18eee86dc3c6f6b223b2c434cffd9198": "alejandra",
     }
     return user_mapping.get(lark_user_id)
+
 
 def get_creative_help():
     return """📊 Creative Tracker Commands
@@ -197,6 +301,12 @@ Examples:
 • creative count Alejandra November
 • creative count me October
 
+**Creator payment:**
+`creative payment <name> <period>`
+Examples:
+• creative payment Aure this month
+• creative payment Alejandra last month
+
 **Language breakdown:**
 `creative language <language> <period>`
 Examples:
@@ -205,12 +315,12 @@ Examples:
 
 **Time periods:**
 • this month
-• last month
+• last month (or just "month")
 • October
 • November 2024
 
 **Test API connection:**
 • creative test
 
-**Note:** Counts items that have exited the Creative Production node and moved beyond."""
-
+**Note:** Counts items that have exited the Creative Production node and moved beyond.
+Payment is calculated at $12 per video."""
