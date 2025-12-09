@@ -474,7 +474,7 @@ class PerformanceCommands:
             "  Examples:\n"
             "    • perf amanda\n"
             "    • perf jonas last 7 days\n"
-            "    • perf sarah yesterday\n\n"
+            "    • perf job yesterday\n\n"
             "**Team Performance:**\n"
             "  `perf team [name] [date_range]` - Get team stats\n"
             "  Examples:\n"
@@ -493,6 +493,6 @@ class PerformanceCommands:
             "  • `today`\n"
             "  • `mtd` (month to date, excludes today)\n"
             "  • `month` (last month)\n\n"
-            "⏰ All times in **Montreal EST**\n"
+            "⏰ All times in **UTC matching A360**\n"
             "📅 Date ranges shown match actual data available"
         )
