@@ -1,11 +1,13 @@
 """
 Performance Commands Handler for Lark Bot
-Handles all performance tracking queries (perf, perf team, etc.)
+Handles all performance tracking queries (perf, perf team, perf overall, etc.)
 """
+
 
 
 from datetime import datetime, timedelta
 import pytz
+
 
 
 
@@ -103,6 +105,9 @@ class PerformanceCommands:
             else:
                 print(f"DEBUG: Routing to specific team '{search_target}'")
                 return self._get_team_performance(search_target, start_date, display_end_date, api_end_date)
+        elif search_target == "overall":
+            print(f"DEBUG: Showing overall performance")
+            return self._get_overall_performance(start_date, display_end_date, api_end_date)
         elif not search_target:
             return self._get_help_text()
         else:
@@ -465,6 +470,76 @@ class PerformanceCommands:
             print(f"ERROR in _get_team_performance: {e}")
             return f"❌ Error fetching team performance: {str(e)}"
     
+    def _get_overall_performance(self, start_date: str, display_end_date: str, api_end_date: str):
+        """
+        Get overall performance stats for ALL media buyers (system-wide summary)
+        
+        Args:
+            start_date: Start date as "YYYY-MM-DD"
+            display_end_date: End date to display as "YYYY-MM-DD"
+            api_end_date: End date for API query as "YYYY-MM-DD"
+        
+        Returns:
+            Overall performance summary message
+        """
+        try:
+            # Get all media buyers
+            media_buyers = self._get_media_buyers_by_department()
+            
+            if not media_buyers:
+                return "❌ No media buyers found in system"
+            
+            # Extract emails
+            emails = [email for email, _ in media_buyers]
+            
+            # Get performance data for all media buyers
+            perf, actual_min_date, actual_max_date = self._get_performance_batch(emails, start_date, api_end_date)
+            
+            # Sum all metrics across all media buyers
+            total_revenue = 0
+            total_spend = 0
+            total_profit = 0
+            total_days_with_data = 0
+            users_with_data = 0
+            
+            for email in emails:
+                email_lower = email.lower()
+                if email_lower in perf and perf[email_lower]["days_with_data"] > 0:
+                    total_revenue += perf[email_lower]["revenue"]
+                    total_spend += perf[email_lower]["spend"]
+                    total_profit += perf[email_lower]["profit"]
+                    total_days_with_data += perf[email_lower]["days_with_data"]
+                    users_with_data += 1
+            
+            # Check if any data found
+            if users_with_data == 0:
+                return f"❌ No data found for overall performance between {start_date} and {display_end_date}"
+            
+            # Calculate ROI
+            roi = (total_profit / total_spend * 100) if total_spend > 0 else 0
+            
+            # Determine status
+            status = "✅" if total_profit > 0 else "❌"
+            
+            # Format date range
+            if actual_min_date and actual_max_date:
+                date_range_display = f"({actual_min_date} to {actual_max_date})"
+            else:
+                date_range_display = f"({start_date} to {display_end_date})"
+            
+            return (
+                f"{status} **Overall Performance** {date_range_display}\n"
+                f"Revenue: ${total_revenue:,.0f}\n"
+                f"Spend: ${total_spend:,.0f}\n"
+                f"Profit: ${total_profit:,.0f}\n"
+                f"ROI: {roi:.1f}%\n"
+                f"Users with data: {users_with_data}"
+            )
+        
+        except Exception as e:
+            print(f"ERROR in _get_overall_performance: {e}")
+            return f"❌ Error fetching overall performance: {str(e)}"
+    
     def _get_help_text(self):
         """Return help text for performance commands"""
         return (
@@ -487,6 +562,12 @@ class PerformanceCommands:
             "    • perf team\n"
             "    • perf team last 7 days\n"
             "    • perf team mtd\n\n"
+            "**Overall Performance:**\n"
+            "  `perf overall [date_range]` - Get system-wide summary\n"
+            "  Examples:\n"
+            "    • perf overall last 7 days\n"
+            "    • perf overall this month\n"
+            "    • perf overall yesterday\n\n"
             "**Date Ranges:**\n"
             "  • `last X days` (excludes today)\n"
             "  • `yesterday`\n"
