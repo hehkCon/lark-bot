@@ -34,7 +34,6 @@ class LarkBaseClient:
 
 
     def _extract_date_string(self, date_field) -> str:
-        print(f"DEBUG _extract_date_string: Raw input = {repr(date_field)} (type: {type(date_field).__name__})")
         """
         ✅ FIXED: Extract date string handling timezone correctly
         
@@ -51,15 +50,17 @@ class LarkBaseClient:
             if isinstance(date_field, dict):
                 date_field = date_field.get("text", "")
         
-        # Handle Unix timestamp in milliseconds (convert to Montreal time)
+        # Handle Unix timestamp in milliseconds
         if isinstance(date_field, (int, float)):
             try:
                 timestamp_seconds = date_field / 1000
-                # ✅ CRITICAL: Treat as UTC first, then convert to Montreal
-                dt_utc = datetime.utcfromtimestamp(timestamp_seconds)
-                return dt_utc.strftime("%Y-%m-%d")
+                # ✅ FIXED: Lark timestamps are midnight Montreal stored as UTC
+                # Add 1 day (86400 seconds) to get correct Montreal date
+                date_obj = datetime.utcfromtimestamp(timestamp_seconds + 86400)
+                return date_obj.strftime("%Y-%m-%d")
             except (ValueError, OSError):
                 pass
+
         
         # Handle string format (ISO string like "2025-11-02 00:00")
         date_str = str(date_field).strip()
