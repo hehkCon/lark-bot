@@ -34,7 +34,7 @@ class PerformanceCommands:
             "dioulde.n@intentt.com": "Dioulde's Team",
             "rachel.l@intentt.com": "Dioulde's Team",
             "jello.c@intentt.com": "Jello's Team",
-            "job.c@intentt.com": "Jello's Team",
+            "job.c@intentt.com": "Kath's Team",
         }
     
     def handle_performance_command(self, text: str, user_open_id: str):
