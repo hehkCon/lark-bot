@@ -34,6 +34,7 @@ class LarkBaseClient:
 
 
     def _extract_date_string(self, date_field) -> str:
+        print(f"DEBUG _extract_date_string: Raw input = {repr(date_field)} (type: {type(date_field).__name__})")
         """
         ✅ FIXED: Extract date string handling timezone correctly
         
