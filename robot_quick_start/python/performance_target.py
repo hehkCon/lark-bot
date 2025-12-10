@@ -271,26 +271,26 @@ class PerformanceTarget:
         target = comparison_data["target"]
         variance = comparison_data["variance"]
         
-        # Determine status based on profit variance
-        profit_var = variance["profit"]
-        profit_var_pct = variance["profit_pct"]
+        # ✅ UPDATED: Determine status based on actual ROI with custom ranges
+        actual_roi = actual["roi"]
+        target_roi = target["roi"]
         
-        if profit_var >= 0:
-            # ✅ Exceeding or meeting target - congratulatory
+        # Target is 25% ROI
+        if actual_roi > 35:
+            status = "✅ **Performance Target (Crushing It!)**"
+            motivation = "🎉 Crushing it team!"
+        elif actual_roi >= 31:
+            status = "✅ **Performance Target (Exceeding!)**"
+            motivation = "👏 Exceeding targets!"
+        elif actual_roi >= 25:
             status = "✅ **Performance Target (On Track!)**"
-            if profit_var_pct > 10:
-                motivation = "🎉 Crushing it team!"
-            elif profit_var_pct > 0:
-                motivation = "👏 Exceeding targets!"
-            else:
-                motivation = "✅ On target"
+            motivation = "✅ On target"
+        elif actual_roi >= 10:
+            status = "⚠️  **Performance Target (Almost There)**"
+            motivation = "💪 Close to target, we're almost there!"
         else:
-            # ❌ Underperforming - encouraging message
             status = "⚠️  **Performance Target (Needs Attention)**"
-            if profit_var_pct > -20:
-                motivation = "💪 Close to target!"
-            else:
-                motivation = "🚀 Refocus needed"
+            motivation = "🚀 Refocus needed"
         
         # Format date range
         if actual_min_date and actual_max_date:
