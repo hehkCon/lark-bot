@@ -1,4 +1,4 @@
-# creative_tracker.py - UPDATED WITH PAYMENT FEATURE
+# creative_tracker.py - UPDATED WITH DYNAMIC PAYMENT RATES BY ROLE
 
 import re
 from datetime import datetime
@@ -14,8 +14,55 @@ CREATOR_USER_IDS = {
     "7562186989836045843": "7562186989836045843",
 }
 
-# Payment rate per video (in dollars)
-PAYMENT_PER_VIDEO = 13
+
+# Payment rates by role (in dollars per video)
+PAYMENT_RATES_BY_ROLE = {
+    "creator": 13.00,
+    "video_editor": 5.50,
+}
+
+# Default payment rate if role not found
+DEFAULT_PAYMENT_RATE = 13.00
+
+
+def get_payment_rate_for_user(creator_name, user_data):
+    """
+    Get payment rate based on user's role from user_data table
+    
+    Args:
+        creator_name: Name or email of the creator
+        user_data: Dictionary of users keyed by email (from Lark Base)
+    
+    Returns:
+        Payment rate in dollars (float)
+    """
+    if not user_data:
+        print(f"DEBUG: user_data is None, using default rate ${DEFAULT_PAYMENT_RATE}")
+        return DEFAULT_PAYMENT_RATE
+    
+    # Try to find the user in user_data
+    creator_lower = creator_name.lower()
+    
+    # First try exact email match
+    if creator_lower in user_data:
+        user_info = user_data[creator_lower]
+        role = user_info.get("role", "").lower()
+        rate = PAYMENT_RATES_BY_ROLE.get(role, DEFAULT_PAYMENT_RATE)
+        print(f"DEBUG: Found {creator_name} with role '{role}', rate: ${rate}")
+        return rate
+    
+    # Try name match
+    for email, info in user_data.items():
+        name = info.get("name", "").lower()
+        if creator_lower in name:
+            role = info.get("role", "").lower()
+            rate = PAYMENT_RATES_BY_ROLE.get(role, DEFAULT_PAYMENT_RATE)
+            print(f"DEBUG: Found {creator_name} (email: {email}) with role '{role}', rate: ${rate}")
+            return rate
+    
+    # User not found, use default
+    print(f"DEBUG: {creator_name} not found in user_data, using default rate ${DEFAULT_PAYMENT_RATE}")
+    return DEFAULT_PAYMENT_RATE
 
 
 def parse_creative_command(text):
@@ -169,8 +216,16 @@ Current statuses:
         return f"❌ Error fetching creative data: {str(e)}"
 
 
-def get_creator_count_and_payment(creator_name, time_period_str, lark_user_id=None):
-    """Returns dict with creator count and payment calculation"""
+def get_creator_count_and_payment(creator_name, time_period_str, user_data=None, lark_user_id=None):
+    """
+    Returns dict with creator count and payment calculation
+    
+    Args:
+        creator_name: Name of the creator
+        time_period_str: Time period string (e.g., "this month")
+        user_data: Dictionary of users from Lark Base (for role lookup)
+        lark_user_id: Lark user ID (optional, for "me" command)
+    """
     client = MeegleClient()
     start_date, end_date, period_name = parse_time_period(time_period_str)
     start_timestamp = int(start_date.timestamp() * 1000)
@@ -234,16 +289,20 @@ def get_creator_count_and_payment(creator_name, time_period_str, lark_user_id=No
                         break
         
         count = len(filtered_items)
-        payment = count * PAYMENT_PER_VIDEO
         
-        print(f"DEBUG: Final count: {count}, Payment: ${payment}")
+        # ✅ NEW: Get payment rate based on user's role
+        payment_rate = get_payment_rate_for_user(creator_name, user_data)
+        payment = count * payment_rate
+        
+        print(f"DEBUG: Final count: {count}, Rate: ${payment_rate}, Payment: ${payment}")
         
         return {
             "success": True,
             "creator": creator_name.title(),
             "period": period_name,
             "count": count,
-            "payment": payment
+            "payment": payment,
+            "rate": payment_rate
         }
         
     except Exception as e:
@@ -306,6 +365,7 @@ Examples:
 Examples:
 • creative payment Aure this month
 • creative payment Alejandra last month
+• creative payment Carolina this month
 
 **Language breakdown:**
 `creative language <language> <period>`
@@ -323,4 +383,6 @@ Examples:
 • creative test
 
 **Note:** Counts items that have exited the Creative Production node and moved beyond.
-Payment is calculated at $13 per video."""
+Payment is calculated based on user role:
+• Creators: $13 per video
+• Video Editors: $5.50 per video"""
