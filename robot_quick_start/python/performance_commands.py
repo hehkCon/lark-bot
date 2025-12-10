@@ -1,14 +1,11 @@
 """
 Performance Commands Handler for Lark Bot
-Handles all performance tracking queries (perf, perf team, perf overall, etc.)
+Handles all performance tracking queries (perf, perf team, perf overall, perf target, etc.)
 """
-
-
 
 from datetime import datetime, timedelta
 import pytz
-
-
+from performance_target import PerformanceTarget
 
 
 class PerformanceCommands:
@@ -25,6 +22,12 @@ class PerformanceCommands:
         self.tracker = performance_tracker
         self.user_data = user_data
         self.montreal_tz = pytz.timezone('America/Toronto')
+        
+        # ✅ Initialize target handler
+        self.target_handler = PerformanceTarget(
+            lark_base_client=performance_tracker.client,
+            performance_tracker=performance_tracker
+        )
         
         # ✅ Team mapping from Lark Base formula
         self.team_mapping = {
@@ -105,6 +108,9 @@ class PerformanceCommands:
             else:
                 print(f"DEBUG: Routing to specific team '{search_target}'")
                 return self._get_team_performance(search_target, start_date, display_end_date, api_end_date)
+        elif search_target and search_target.lower() == "target":
+            print(f"DEBUG: Showing target comparison")
+            return self._get_target_comparison(start_date, display_end_date, api_end_date)
         elif search_target == "overall":
             print(f"DEBUG: Showing overall performance")
             return self._get_overall_performance(start_date, display_end_date, api_end_date)
@@ -134,17 +140,17 @@ class PerformanceCommands:
         
         if "yesterday" in date_range_lower:
             yesterday = today - timedelta(days=1)
-            api_end = today  # Tomorrow is today
+            api_end = today
             return yesterday.isoformat(), yesterday.isoformat(), api_end.isoformat()
         
         elif "today" in date_range_lower:
-            api_end = today + timedelta(days=1)  # Tomorrow
+            api_end = today + timedelta(days=1)
             return today.isoformat(), today.isoformat(), api_end.isoformat()
         
         elif "mtd" in date_range_lower or "month to date" in date_range_lower:
             month_start = today.replace(day=1)
-            yesterday = today - timedelta(days=1)  # Display up to yesterday
-            api_end = today  # API query includes today
+            yesterday = today - timedelta(days=1)
+            api_end = today
             return month_start.isoformat(), yesterday.isoformat(), api_end.isoformat()
         
         elif "month" in date_range_lower:
@@ -159,18 +165,16 @@ class PerformanceCommands:
                 parts = date_range_lower.split()
                 if len(parts) >= 2:
                     days = int(parts[1])
-                    # ✅ FIXED: Properly separate display_end and api_end
-                    display_end = today - timedelta(days=1)  # Yesterday (what to display)
-                    start = display_end - timedelta(days=days-1)  # X days total
-                    api_end = display_end + timedelta(days=1)  # Tomorrow (for API query)
+                    display_end = today - timedelta(days=1)
+                    start = display_end - timedelta(days=days-1)
+                    api_end = display_end + timedelta(days=1)
                     return start.isoformat(), display_end.isoformat(), api_end.isoformat()
             except (ValueError, IndexError):
                 pass
         
-        # ✅ FIXED: Default to last 7 days excluding today
-        display_end = today - timedelta(days=1)  # Yesterday
-        start = display_end - timedelta(days=6)  # 7 days total
-        api_end = display_end + timedelta(days=1)  # Tomorrow
+        display_end = today - timedelta(days=1)
+        start = display_end - timedelta(days=6)
+        api_end = display_end + timedelta(days=1)
         return start.isoformat(), display_end.isoformat(), api_end.isoformat()
     
     def _find_user_by_email_or_name(self, target: str):
@@ -213,9 +217,6 @@ class PerformanceCommands:
         
         Returns:
             Tuple of (perf_by_email, actual_min_date, actual_max_date)
-            - perf_by_email: Dictionary with performance data by email
-            - actual_min_date: Actual minimum date found in data (or None)
-            - actual_max_date: Actual maximum date found in data (or None)
         """
         records = self.tracker.client.get_performance_records(start_date, api_end_date)
         
@@ -248,7 +249,6 @@ class PerformanceCommands:
             campaign_manager_field = fields.get("campaign_manager", "")
             
             manager_email = self.tracker.client._extract_email_from_field(campaign_manager_field)
-            
             manager_email_lower = manager_email.lower() if manager_email else ""
             
             if not manager_email_lower:
@@ -270,7 +270,6 @@ class PerformanceCommands:
         
         print(f"DEBUG: Matched {matched_count} records for {len([e for e in perf_by_email.values() if e['days_with_data'] > 0])} users")
         
-        # ✅ NEW: Calculate actual min/max dates from data
         if actual_dates_found:
             actual_min_date = min(actual_dates_found)
             actual_max_date = max(actual_dates_found)
@@ -281,18 +280,7 @@ class PerformanceCommands:
         return perf_by_email, actual_min_date, actual_max_date
     
     def _get_individual_performance(self, name: str, start_date: str, display_end_date: str, api_end_date: str):
-        """
-        Get performance stats for an individual media buyer
-        
-        Args:
-            name: Name to search for (e.g., "jonas", "amanda")
-            start_date: Start date as "YYYY-MM-DD"
-            display_end_date: End date to display as "YYYY-MM-DD"
-            api_end_date: End date for API query as "YYYY-MM-DD"
-        
-        Returns:
-            Performance summary message
-        """
+        """Get performance stats for an individual media buyer"""
         if not name or name.lower() in ["", "all", "team"]:
             return self._get_team_performance(None, start_date, display_end_date, api_end_date)
         
@@ -304,7 +292,6 @@ class PerformanceCommands:
             if "media_buying" not in user_info.get("department", "").lower():
                 return f"❌ No performance data for {user_info['name']} (not a media buyer)"
             
-            # ✅ NEW: Unpack 3 values including actual dates
             perf, actual_min_date, actual_max_date = self._get_performance_batch([email], start_date, api_end_date)
             
             email_lower = email.lower()
@@ -319,10 +306,8 @@ class PerformanceCommands:
             roi = (total_profit / total_spend * 100) if total_spend > 0 else 0
             
             status = "✅" if roi >= 20 else "⚠️" if roi >= 10 else "❌"
-            
             team_name = self.team_mapping.get(email_lower, "Unknown Team")
             
-            # ✅ FIXED: Use actual dates from data (no +1 day shift needed!)
             if actual_min_date and actual_max_date:
                 date_range_display = f"({actual_min_date} to {actual_max_date})"
             else:
@@ -342,18 +327,7 @@ class PerformanceCommands:
             return f"❌ Error fetching performance for '{name}': {str(e)}"
     
     def _get_team_performance(self, team_name: str, start_date: str, display_end_date: str, api_end_date: str):
-        """
-        Get performance stats for a team or all teams
-        
-        Args:
-            team_name: Team name to search for (None for all teams)
-            start_date: Start date as "YYYY-MM-DD"
-            display_end_date: End date to display as "YYYY-MM-DD"
-            api_end_date: End date for API query as "YYYY-MM-DD"
-        
-        Returns:
-            Team performance summary message
-        """
+        """Get performance stats for a team or all teams"""
         try:
             media_buyers = self._get_media_buyers_by_department()
             
@@ -361,7 +335,6 @@ class PerformanceCommands:
                 return "❌ No media buyers found"
             
             emails = [email for email, _ in media_buyers]
-            # ✅ NEW: Unpack 3 values including actual dates
             perf, actual_min_date, actual_max_date = self._get_performance_batch(emails, start_date, api_end_date)
             
             if team_name:
@@ -370,14 +343,12 @@ class PerformanceCommands:
                 team_emails = []
                 actual_team_name = None
                 
-                # First try exact team name match
                 for email, team in self.team_mapping.items():
                     if team.lower() == team_name.lower():
                         team_emails.append(email)
                         actual_team_name = team
                         break
                 
-                # If no exact match, try leader name match
                 if not team_emails:
                     for email, team in self.team_mapping.items():
                         leader_name = team.split("'")[0].lower()
@@ -414,7 +385,6 @@ class PerformanceCommands:
                 
                 display_team_name = actual_team_name or team_name
                 
-                # ✅ FIXED: Use actual dates from data (no +1 day shift needed!)
                 if actual_min_date and actual_max_date:
                     date_range_display = f"({actual_min_date} to {actual_max_date})"
                 else:
@@ -447,7 +417,6 @@ class PerformanceCommands:
                 if not teams_data:
                     return f"❌ No team data found between {start_date} and {display_end_date}"
                 
-                # ✅ FIXED: Use actual dates from data (no +1 day shift needed!)
                 if actual_min_date and actual_max_date:
                     date_range_display = f"({actual_min_date} to {actual_max_date})"
                 else:
@@ -471,31 +440,16 @@ class PerformanceCommands:
             return f"❌ Error fetching team performance: {str(e)}"
     
     def _get_overall_performance(self, start_date: str, display_end_date: str, api_end_date: str):
-        """
-        Get overall performance stats for ALL media buyers (system-wide summary)
-        
-        Args:
-            start_date: Start date as "YYYY-MM-DD"
-            display_end_date: End date to display as "YYYY-MM-DD"
-            api_end_date: End date for API query as "YYYY-MM-DD"
-        
-        Returns:
-            Overall performance summary message
-        """
+        """Get overall performance stats for ALL media buyers"""
         try:
-            # Get all media buyers
             media_buyers = self._get_media_buyers_by_department()
             
             if not media_buyers:
                 return "❌ No media buyers found in system"
             
-            # Extract emails
             emails = [email for email, _ in media_buyers]
-            
-            # Get performance data for all media buyers
             perf, actual_min_date, actual_max_date = self._get_performance_batch(emails, start_date, api_end_date)
             
-            # Sum all metrics across all media buyers
             total_revenue = 0
             total_spend = 0
             total_profit = 0
@@ -511,17 +465,12 @@ class PerformanceCommands:
                     total_days_with_data += perf[email_lower]["days_with_data"]
                     users_with_data += 1
             
-            # Check if any data found
             if users_with_data == 0:
                 return f"❌ No data found for overall performance between {start_date} and {display_end_date}"
             
-            # Calculate ROI
             roi = (total_profit / total_spend * 100) if total_spend > 0 else 0
-            
-            # Determine status
             status = "✅" if total_profit > 0 else "❌"
             
-            # Format date range
             if actual_min_date and actual_max_date:
                 date_range_display = f"({actual_min_date} to {actual_max_date})"
             else:
@@ -539,6 +488,72 @@ class PerformanceCommands:
         except Exception as e:
             print(f"ERROR in _get_overall_performance: {e}")
             return f"❌ Error fetching overall performance: {str(e)}"
+    
+    def _get_target_comparison(self, start_date: str, display_end_date: str, api_end_date: str):
+        """Get performance vs target comparison"""
+        try:
+            print(f"DEBUG: Fetching actual performance for comparison")
+            
+            media_buyers = self._get_media_buyers_by_department()
+            if not media_buyers:
+                return "❌ No media buyers found"
+            
+            emails = [email for email, _ in media_buyers]
+            
+            actual_perf, actual_min_date, actual_max_date = self._get_performance_batch(
+                emails, start_date, api_end_date
+            )
+            
+            total_actual_revenue = 0
+            total_actual_spend = 0
+            total_actual_profit = 0
+            total_days_with_data = 0
+            
+            for email_lower in actual_perf:
+                if actual_perf[email_lower]["days_with_data"] > 0:
+                    total_actual_revenue += actual_perf[email_lower]["revenue"]
+                    total_actual_spend += actual_perf[email_lower]["spend"]
+                    total_actual_profit += actual_perf[email_lower]["profit"]
+                    total_days_with_data += actual_perf[email_lower]["days_with_data"]
+            
+            actual_roi = (total_actual_profit / total_actual_spend * 100) if total_actual_spend > 0 else 0
+            
+            actual_data = {
+                "success": total_days_with_data > 0,
+                "revenue": total_actual_revenue,
+                "spend": total_actual_spend,
+                "profit": total_actual_profit,
+                "roi": actual_roi,
+                "days_with_data": total_days_with_data
+            }
+            
+            if not actual_data["success"]:
+                return f"❌ No actual data found between {start_date} and {display_end_date}"
+            
+            print(f"DEBUG: Actual data summary: R=${total_actual_revenue:,.0f}, S=${total_actual_spend:,.0f}, P=${total_actual_profit:,.0f}")
+            
+            print(f"DEBUG: Fetching projection data")
+            projection_data = self.target_handler.get_projection_data(start_date, api_end_date)
+            
+            if not projection_data.get("success"):
+                print(f"DEBUG: ⚠️  {projection_data.get('error')}")
+                return f"⚠️  Unable to fetch projection data: {projection_data.get('error')}"
+            
+            comparison = self.target_handler.get_actual_vs_target(actual_data, projection_data)
+            
+            if not comparison.get("success"):
+                return comparison.get("error", "❌ Unable to compare data")
+            
+            return self.target_handler.format_comparison(
+                comparison,
+                f"{start_date} to {display_end_date}",
+                actual_min_date,
+                actual_max_date
+            )
+        
+        except Exception as e:
+            print(f"ERROR in _get_target_comparison: {e}")
+            return f"❌ Error fetching target comparison: {str(e)}"
     
     def _get_help_text(self):
         """Return help text for performance commands"""
@@ -568,6 +583,16 @@ class PerformanceCommands:
             "    • perf overall last 7 days\n"
             "    • perf overall this month\n"
             "    • perf overall yesterday\n\n"
+            "**Performance Targets:**\n"
+            "  `perf target [date_range]` - Compare actual vs projected performance\n"
+            "  Examples:\n"
+            "    • perf target last 3 days\n"
+            "    • perf target last 7 days\n"
+            "    • perf target this month\n"
+            "    • perf target yesterday\n"
+            "    • perf target mtd\n"
+            "    • perf target month\n\n"
+            "  Shows: Actual vs Target metrics with variance analysis and insights\n\n"
             "**Date Ranges:**\n"
             "  • `last X days` (excludes today)\n"
             "  • `yesterday`\n"
