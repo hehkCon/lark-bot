@@ -3,9 +3,12 @@ Performance Commands Handler for Lark Bot
 Handles all performance tracking queries (perf, perf team, perf overall, perf target, etc.)
 """
 
+
 from datetime import datetime, timedelta
 import pytz
+import os
 from performance_target import PerformanceTarget
+
 
 
 class PerformanceCommands:
@@ -23,10 +26,11 @@ class PerformanceCommands:
         self.user_data = user_data
         self.montreal_tz = pytz.timezone('America/Toronto')
         
-        # ✅ Initialize target handler
+        # ✅ Initialize target handler with projection table ID from .env
         self.target_handler = PerformanceTarget(
             lark_base_client=performance_tracker.client,
-            performance_tracker=performance_tracker
+            performance_tracker=performance_tracker,
+            projection_table_id=os.getenv('LARK_BASE_PROJECTIONS_TABLE_ID')
         )
         
         # ✅ Team mapping from Lark Base formula
@@ -558,7 +562,7 @@ class PerformanceCommands:
     def _get_help_text(self):
         """Return help text for performance commands"""
         return (
-            "📊 **Performance Commands Help**\n\n"
+            "�� **Performance Commands Help**\n\n"
             "**Individual Performance:**\n"
             "  `perf [name] [date_range]` - Get individual stats\n"
             "  Examples:\n"

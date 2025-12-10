@@ -10,20 +10,21 @@ import pytz
 class PerformanceTarget:
     """Handler for performance target comparisons"""
     
-    def __init__(self, lark_base_client, performance_tracker):
+    def __init__(self, lark_base_client, performance_tracker, projection_table_id=None):
         """
         Initialize PerformanceTarget handler
         
         Args:
             lark_base_client: LarkBaseClient instance for querying tables
             performance_tracker: PerformanceTracker instance for actual data
+            projection_table_id: Table ID for projections (from .env or hardcoded default)
         """
         self.lark_client = lark_base_client
         self.tracker = performance_tracker
         self.montreal_tz = pytz.timezone('America/Toronto')
         
-        # Table IDs from Lark Base
-        self.projection_table_id = "tblMhyHMr7A4qEhQ"
+        # ✅ UPDATED: Use passed projection_table_id, fallback to default
+        self.projection_table_id = projection_table_id or "tblMhyHMr7A4qEhQ"
     
     def get_projection_data(self, start_date_str, end_date_str):
         """
@@ -39,9 +40,9 @@ class PerformanceTarget:
         try:
             print(f"DEBUG: Fetching projections from {start_date_str} to {end_date_str}")
             
-            # ✅ FIXED: Fetch all records and filter by projection_date ourselves
-            # (because _search_records looks for "date", but projection table uses "projection_date")
-            all_records = self.lark_client.get_table_records(self.projection_table_id)
+            # ✅ FIXED: Use _search_records() without date params to get ALL records
+            # Then filter by projection_date ourselves
+            all_records = self.lark_client._search_records(self.projection_table_id)
             print(f"DEBUG: Got {len(all_records)} total records from projection table")
             
             if not all_records:
