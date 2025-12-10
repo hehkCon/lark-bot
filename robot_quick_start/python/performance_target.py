@@ -26,6 +26,56 @@ class PerformanceTarget:
         # ✅ UPDATED: Use passed projection_table_id, fallback to default
         self.projection_table_id = projection_table_id or "tblMhyHMr7A4qEhQ"
     
+    def _extract_numeric_value(self, value):
+        """
+        Extract numeric value from various field formats
+        Handles: simple numbers, dict with 'value' key, list with dict items, etc.
+        
+        Args:
+            value: Field value from Lark Base (can be number, string, dict, list, etc.)
+        
+        Returns:
+            Float value or 0 if unable to parse
+        """
+        if value is None or value == "":
+            return 0
+        
+        # Already a number
+        if isinstance(value, (int, float)):
+            return float(value)
+        
+        # String number
+        if isinstance(value, str):
+            try:
+                return float(value)
+            except ValueError:
+                return 0
+        
+        # Dict format (like {"value": 1000})
+        if isinstance(value, dict):
+            numeric_val = value.get("value") or value.get("text") or 0
+            try:
+                return float(numeric_val)
+            except (ValueError, TypeError):
+                return 0
+        
+        # Array format
+        if isinstance(value, list) and len(value) > 0:
+            first_item = value[0]
+            if isinstance(first_item, dict):
+                numeric_val = first_item.get("value") or first_item.get("text") or 0
+                try:
+                    return float(numeric_val)
+                except (ValueError, TypeError):
+                    return 0
+            else:
+                try:
+                    return float(first_item)
+                except (ValueError, TypeError):
+                    return 0
+        
+        return 0
+    
     def get_projection_data(self, start_date_str, end_date_str):
         """
         Fetch projection data from Lark Base table
@@ -80,19 +130,16 @@ class PerformanceTarget:
             for record in filtered_records:
                 fields = record.get("fields", {})
                 
-                try:
-                    revenue = float(fields.get("revenue", 0) or 0)
-                    spend = float(fields.get("spend", 0) or 0)
-                    profit = float(fields.get("profit", 0) or 0)
-                    
-                    total_revenue += revenue
-                    total_spend += spend
-                    total_profit += profit
-                    
-                    print(f"DEBUG: Projection record: R=${revenue}, S=${spend}, P=${profit}")
-                except (ValueError, TypeError) as e:
-                    print(f"DEBUG: Error parsing metrics in record: {e}")
-                    continue
+                # ✅ FIXED: Use _extract_numeric_value to handle various field formats
+                revenue = self._extract_numeric_value(fields.get("revenue", 0))
+                spend = self._extract_numeric_value(fields.get("spend", 0))
+                profit = self._extract_numeric_value(fields.get("profit", 0))
+                
+                total_revenue += revenue
+                total_spend += spend
+                total_profit += profit
+                
+                print(f"DEBUG: Projection record: R=${revenue}, S=${spend}, P=${profit}")
             
             # Calculate ROI
             roi = (total_profit / total_spend * 100) if total_spend > 0 else 0
