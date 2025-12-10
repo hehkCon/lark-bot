@@ -39,11 +39,12 @@ class PerformanceTarget:
         try:
             print(f"DEBUG: Fetching projections from {start_date_str} to {end_date_str}")
             
-            # ✅ FIXED: Use _search_records() instead of get_table_records()
-            records = self.lark_client._search_records(self.projection_table_id, start_date_str, end_date_str)
-            print(f"DEBUG: Got {len(records)} total projection records in date range")
+            # ✅ FIXED: Fetch all records and filter by projection_date ourselves
+            # (because _search_records looks for "date", but projection table uses "projection_date")
+            all_records = self.lark_client.get_table_records(self.projection_table_id)
+            print(f"DEBUG: Got {len(all_records)} total records from projection table")
             
-            if not records:
+            if not all_records:
                 print("DEBUG: No projection records found!")
                 return {
                     "success": False,
@@ -51,12 +52,31 @@ class PerformanceTarget:
                     "records_found": 0
                 }
             
-            # Aggregate metrics from records
+            # Filter records by projection_date
+            filtered_records = []
+            for record in all_records:
+                fields = record.get("fields", {})
+                date_str = self.lark_client._extract_date_string(fields.get("projection_date"))
+                
+                if date_str and start_date_str <= date_str <= end_date_str:
+                    filtered_records.append(record)
+            
+            print(f"DEBUG: Filtered to {len(filtered_records)} projection records in date range {start_date_str} to {end_date_str}")
+            
+            if not filtered_records:
+                print("DEBUG: No projection records in date range!")
+                return {
+                    "success": False,
+                    "error": "⚠️  No projection data found for this date range",
+                    "records_found": 0
+                }
+            
+            # Aggregate metrics from filtered records
             total_revenue = 0
             total_spend = 0
             total_profit = 0
             
-            for record in records:
+            for record in filtered_records:
                 fields = record.get("fields", {})
                 
                 try:
@@ -76,7 +96,7 @@ class PerformanceTarget:
             # Calculate ROI
             roi = (total_profit / total_spend * 100) if total_spend > 0 else 0
             
-            print(f"DEBUG: Projection summary - {len(records)} records")
+            print(f"DEBUG: Projection summary - {len(filtered_records)} records")
             print(f"DEBUG: R=${total_revenue:,.0f}, S=${total_spend:,.0f}, P=${total_profit:,.0f}, ROI={roi:.1f}%")
             
             return {
@@ -85,8 +105,8 @@ class PerformanceTarget:
                 "spend": total_spend,
                 "profit": total_profit,
                 "roi": roi,
-                "days_count": len(records),
-                "records_found": len(records)
+                "days_count": len(filtered_records),
+                "records_found": len(filtered_records)
             }
         
         except Exception as e:
