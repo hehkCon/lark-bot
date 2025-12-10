@@ -15,7 +15,7 @@ class PerformanceTarget:
         Initialize PerformanceTarget handler
         
         Args:
-            lark_base_client: LarkBase API client for querying tables
+            lark_base_client: LarkBaseClient instance for querying tables
             performance_tracker: PerformanceTracker instance for actual data
         """
         self.lark_client = lark_base_client
@@ -24,7 +24,6 @@ class PerformanceTarget:
         
         # Table IDs from Lark Base
         self.projection_table_id = "tblMhyHMr7A4qEhQ"
-        self.performance_table_id = "tblQuLH08cVG4ber"
     
     def get_projection_data(self, start_date_str, end_date_str):
         """
@@ -40,9 +39,9 @@ class PerformanceTarget:
         try:
             print(f"DEBUG: Fetching projections from {start_date_str} to {end_date_str}")
             
-            # Query projection table
-            records = self.lark_client.get_table_records(self.projection_table_id)
-            print(f"DEBUG: Got {len(records)} total projection records")
+            # ✅ FIXED: Use _search_records() instead of get_table_records()
+            records = self.lark_client._search_records(self.projection_table_id, start_date_str, end_date_str)
+            print(f"DEBUG: Got {len(records)} total projection records in date range")
             
             if not records:
                 print("DEBUG: No projection records found!")
@@ -52,8 +51,7 @@ class PerformanceTarget:
                     "records_found": 0
                 }
             
-            # Filter by date range and aggregate
-            matching_dates = []
+            # Aggregate metrics from records
             total_revenue = 0
             total_spend = 0
             total_profit = 0
@@ -61,21 +59,6 @@ class PerformanceTarget:
             for record in records:
                 fields = record.get("fields", {})
                 
-                # Extract projection_date
-                projection_date_field = fields.get("projection_date")
-                if not projection_date_field:
-                    continue
-                
-                projection_date = self._extract_date_string(projection_date_field)
-                if not projection_date:
-                    continue
-                
-                # Check if date is in range
-                if not (start_date_str <= projection_date <= end_date_str):
-                    print(f"DEBUG: Projection date {projection_date} outside range")
-                    continue
-                
-                # Extract metrics
                 try:
                     revenue = float(fields.get("revenue", 0) or 0)
                     spend = float(fields.get("spend", 0) or 0)
@@ -84,25 +67,16 @@ class PerformanceTarget:
                     total_revenue += revenue
                     total_spend += spend
                     total_profit += profit
-                    matching_dates.append(projection_date)
                     
-                    print(f"DEBUG: Projection {projection_date}: R=${revenue}, S=${spend}, P=${profit}")
+                    print(f"DEBUG: Projection record: R=${revenue}, S=${spend}, P=${profit}")
                 except (ValueError, TypeError) as e:
-                    print(f"DEBUG: Error parsing metrics for {projection_date}: {e}")
+                    print(f"DEBUG: Error parsing metrics in record: {e}")
                     continue
-            
-            if not matching_dates:
-                print(f"DEBUG: ⚠️  No projection dates found in range {start_date_str} to {end_date_str}")
-                return {
-                    "success": False,
-                    "error": f"⚠️  No projection data found for dates {start_date_str} to {end_date_str}",
-                    "records_found": 0
-                }
             
             # Calculate ROI
             roi = (total_profit / total_spend * 100) if total_spend > 0 else 0
             
-            print(f"DEBUG: Projection summary - {len(matching_dates)} days")
+            print(f"DEBUG: Projection summary - {len(records)} records")
             print(f"DEBUG: R=${total_revenue:,.0f}, S=${total_spend:,.0f}, P=${total_profit:,.0f}, ROI={roi:.1f}%")
             
             return {
@@ -111,12 +85,14 @@ class PerformanceTarget:
                 "spend": total_spend,
                 "profit": total_profit,
                 "roi": roi,
-                "days_count": len(matching_dates),
-                "records_found": len(matching_dates)
+                "days_count": len(records),
+                "records_found": len(records)
             }
         
         except Exception as e:
             print(f"ERROR in get_projection_data: {e}")
+            import traceback
+            print(traceback.format_exc())
             return {
                 "success": False,
                 "error": f"❌ Error fetching projection data: {str(e)}",
@@ -200,6 +176,8 @@ class PerformanceTarget:
         
         except Exception as e:
             print(f"ERROR in get_actual_vs_target: {e}")
+            import traceback
+            print(traceback.format_exc())
             return {
                 "success": False,
                 "error": f"Error calculating variance: {str(e)}"
@@ -278,29 +256,3 @@ Variance: {variance['roi']:+.1f}% ({variance['roi_pct']:+.1f}%)
 📊 Days analyzed: {actual['days']}"""
         
         return response
-    
-    def _extract_date_string(self, field_value):
-        """
-        Extract date string from Lark field value
-        
-        Args:
-            field_value: Can be string "YYYY-MM-DD" or dict with "timestamp"
-        
-        Returns:
-            Date string "YYYY-MM-DD" or None
-        """
-        if isinstance(field_value, str):
-            # Try to extract YYYY-MM-DD format
-            if len(field_value) >= 10:
-                return field_value[:10]
-            return None
-        elif isinstance(field_value, dict):
-            # Might be timestamp format
-            timestamp = field_value.get("timestamp")
-            if timestamp:
-                try:
-                    dt = datetime.fromtimestamp(timestamp / 1000, tz=self.montreal_tz)
-                    return dt.strftime("%Y-%m-%d")
-                except (ValueError, TypeError):
-                    return None
-        return None
