@@ -15,7 +15,7 @@ CREATOR_USER_IDS = {
 }
 
 # Payment rate per video (in dollars)
-PAYMENT_PER_VIDEO = 12
+PAYMENT_PER_VIDEO = 13
 
 
 def parse_creative_command(text):
@@ -323,4 +323,4 @@ Examples:
 • creative test
 
 **Note:** Counts items that have exited the Creative Production node and moved beyond.
-Payment is calculated at $12 per video."""
+Payment is calculated at $13 per video."""

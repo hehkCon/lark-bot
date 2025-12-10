@@ -359,7 +359,8 @@ I'm your Intentt Bot Assistant. Here's what I can do:
 • `perf team` - All teams
 • `perf amanda` - Amanda's Team
 • `perf help` - See all commands
-- Please note that data is manually updated and can be delayed
+- Please note that data is manually updated 
+  into a Lark Base table and can be delayed
 
 
 
