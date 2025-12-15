@@ -1,4 +1,4 @@
-# creative_tracker.py - UPDATED WITH DYNAMIC PAYMENT RATES BY ROLE
+# creative_tracker.py - UPDATED WITH FIX FOR EMAIL LIST FORMAT
 
 import re
 import os
@@ -51,11 +51,37 @@ def get_user_data_from_lark(lark_base_client, users_table_id):
         for record in all_records:
             fields = record.get("fields", {})
             
-            # Extract user info
-            email = fields.get("email", "").lower() if fields.get("email") else None
-            name = fields.get("name", "")
-            role = fields.get("role", "")
-            department = fields.get("department", "")
+            # ✅ FIXED: Extract email from list format (like [{"text": "email@domain.com"}])
+            email_field = fields.get("email", [])
+            email = ""
+            if isinstance(email_field, list) and len(email_field) > 0:
+                email = email_field[0].get("text", "").lower() if isinstance(email_field[0], dict) else str(email_field[0]).lower()
+            elif isinstance(email_field, str):
+                email = email_field.lower()
+            
+            # ✅ FIXED: Extract name from list format
+            name_field = fields.get("name", [])
+            name = ""
+            if isinstance(name_field, list) and len(name_field) > 0:
+                name = name_field[0].get("text", "") if isinstance(name_field[0], dict) else str(name_field[0])
+            elif isinstance(name_field, str):
+                name = name_field
+            
+            # ✅ FIXED: Extract role from list format
+            role_field = fields.get("role", [])
+            role = ""
+            if isinstance(role_field, list) and len(role_field) > 0:
+                role = role_field[0].get("text", "") if isinstance(role_field[0], dict) else str(role_field[0])
+            elif isinstance(role_field, str):
+                role = role_field
+            
+            # ✅ FIXED: Extract department from list format
+            department_field = fields.get("department", [])
+            department = ""
+            if isinstance(department_field, list) and len(department_field) > 0:
+                department = department_field[0].get("text", "") if isinstance(department_field[0], dict) else str(department_field[0])
+            elif isinstance(department_field, str):
+                department = department_field
             
             if email:
                 user_data[email] = {
@@ -64,7 +90,7 @@ def get_user_data_from_lark(lark_base_client, users_table_id):
                     "department": department,
                     "record_id": record.get("record_id")
                 }
-                print(f"DEBUG: Loaded user {email} - role: {role}, department: {department}")
+                print(f"DEBUG: Loaded user {email} - name: {name}, role: {role}, department: {department}")
         
         print(f"DEBUG: Successfully loaded {len(user_data)} users from Lark Base")
         return user_data
