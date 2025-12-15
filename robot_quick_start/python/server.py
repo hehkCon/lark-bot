@@ -1,5 +1,4 @@
-# ✅ server.py - UPDATED WITH SCHEDULER INTEGRATION
-# Add this to your existing server.py
+# ✅ server.py - FULL UPDATED VERSION WITH CREATIVE PAYMENT USER DATA
 
 import json
 import logging
@@ -11,11 +10,20 @@ from api import MessageApiClient, TokenManager
 from lark_base_client import LarkBaseClient, PerformanceTracker
 from performance_commands import PerformanceCommands
 from commission import calculate_commission, get_help_message
-from creative_tracker import parse_creative_command, count_creatives_by_creator, get_creator_count_and_payment, count_creatives_by_language, get_creative_help
+from creative_tracker import (
+    parse_creative_command, 
+    count_creatives_by_creator, 
+    get_creator_count_and_payment, 
+    count_creatives_by_language, 
+    get_creative_help,
+    get_user_data_from_lark  # ✅ ADD THIS IMPORT
+)
+
 
 # ✅ NEW IMPORTS FOR SCHEDULERS
 from performance_scheduler import PerformanceScheduler
 from user_performance_scheduler import UserPerformanceScheduler
+
 
 
 # Load environment variables
@@ -28,9 +36,11 @@ LARK_BASE_COMBINED_PERFORMANCE_TABLE_ID = os.getenv("LARK_BASE_COMBINED_PERFORMA
 LARK_BASE_USER_INFO_TABLE_ID = os.getenv("LARK_BASE_USER_INFO_TABLE_ID")
 
 
+
 # Configurable settings
 PORT = int(os.getenv("PORT", 10000))
 DEBUG = os.getenv("DEBUG", "False").lower() == "true"
+
 
 
 # Debug prints
@@ -43,7 +53,9 @@ print(f"DEBUG: LARK_BASE_COMBINED_PERFORMANCE_TABLE_ID={LARK_BASE_COMBINED_PERFO
 print(f"DEBUG: PORT={PORT}, DEBUG={DEBUG}")
 
 
+
 app = Flask(__name__)
+
 
 
 # Initialize message client and token manager (GLOBAL - used everywhere)
@@ -51,13 +63,16 @@ token_manager = TokenManager(APP_ID, APP_SECRET, LARK_HOST)
 message_api_client = MessageApiClient(APP_ID, APP_SECRET, token_manager)
 
 
+
 # GLOBAL SINGLETONS - Initialize once at startup
 performance_tracker_instance = None
 user_data_cache = None
 
+
 # ✅ NEW: Global scheduler instances
 performance_scheduler_instance = None
 user_performance_scheduler_instance = None
+
 
 
 # Thread-safe duplicate event processing
@@ -65,10 +80,12 @@ processed_events = set()
 processed_events_lock = threading.Lock()
 
 
+
 @app.errorhandler(Exception)
 def handle_exception(e):
     logging.error(f"Unhandled exception: {e}", exc_info=True)
     return jsonify({"error": str(e)}), 500
+
 
 
 def init_trackers():
@@ -103,6 +120,7 @@ def init_trackers():
     except Exception as e:
         print(f"❌ ERROR: Failed to initialize trackers: {e}")
         performance_tracker_instance = None
+
 
 
 def init_schedulers():
@@ -147,10 +165,12 @@ def init_schedulers():
         print(f"Traceback: {traceback.format_exc()}")
 
 
+
 @app.route("/", methods=["GET", "POST"])
 def callback_event_handler():
     if request.method == "GET":
         return jsonify({"message": "Bot is running"}), 200
+
 
 
     # POST request - handle Lark events
@@ -158,11 +178,13 @@ def callback_event_handler():
     print(f"DEBUG: Received POST data: {json.dumps(req_data, indent=2)}")
 
 
+
     # URL verification challenge
     if req_data.get("type") == "url_verification":
         challenge = req_data.get("challenge")
         print(f"DEBUG: URL verification challenge received")
         return jsonify({"challenge": challenge})
+
 
 
     # FIXED: THREAD-SAFE duplicate event processing
@@ -178,12 +200,15 @@ def callback_event_handler():
             print("DEBUG: Cleared processed_events cache (1000+ events)")
 
 
+
     print(f"DEBUG: Processing new event {event_id}")
+
 
 
     # Extract event type
     event_type = req_data.get("header", {}).get("event_type")
     print(f"DEBUG: Event type: {event_type}")
+
 
 
     # Message received event
@@ -194,9 +219,11 @@ def callback_event_handler():
         print(f"DEBUG: Message type: {message_type}")
 
 
+
         if message_type != "text":
             logging.info(f"Ignoring non-text message type: {message_type}")
             return jsonify({"message": "ignored"}), 200
+
 
 
         content_str = message.get("content", "{}")
@@ -204,13 +231,16 @@ def callback_event_handler():
         text = content.get("text", "").strip()
 
 
+
         sender = event_data.get("sender", {})
         sender_id = sender.get("sender_id", {})
         user_open_id = sender_id.get("open_id")
 
 
+
         chat_id = message.get("chat_id")
         chat_type = message.get("chat_type")
+
 
 
         # Strip @mention prefix in group chats
@@ -219,12 +249,15 @@ def callback_event_handler():
             print(f"DEBUG: Stripped mention prefix, cleaned text: {text}")
 
 
+
         logging.info(f"Received message from {user_open_id} in {chat_type} chat: {text}")
         print(f"DEBUG: Received message from {user_open_id} in {chat_type} chat (chat_id: {chat_id}): {text}")
 
 
+
         response_text = None
         text_lower = text.lower()
+
 
 
         # FIXED: Use GLOBAL singleton (no more reinitialization per command)
@@ -251,6 +284,7 @@ def callback_event_handler():
                     print(f"DEBUG: Error in perf help: {e}")
 
 
+
             # Handle performance commands
             elif text_lower.startswith("perf"):
                 try:
@@ -270,14 +304,17 @@ def callback_event_handler():
                     print(f"DEBUG: Error in perf command: {e}")
 
 
+
             # Handle commission help explicitly
             elif text_lower == "commission help":
                 response_text = get_help_message()
 
 
+
             # Handle commission commands
             elif any(text.upper().startswith(platform) for platform in ["GINSU", "BING", "YAHOO", "RSOC"]):
                 response_text = calculate_commission(text, user_open_id)
+
 
 
             # Handle creative commands
@@ -314,20 +351,41 @@ def callback_event_handler():
                         parsed["creator"], parsed["time_period"], lark_user_id=user_open_id
                     )
                 elif parsed["type"] == "payment":
-                    result = get_creator_count_and_payment(
-                        parsed["creator"], parsed["time_period"], lark_user_id=user_open_id
-                    )
-                    if result["success"]:
-                        response_text = f"""✅ **{result['creator']}** - Creative Payment ({result['period']})
+                    try:
+                        # ✅ FIXED: Fetch user data from Lark Base
+                        users_table_id = os.getenv("LARK_BASE_USER_INFO_TABLE_ID")
+                        lark_client = LarkBaseClient(
+                            app_token=LARK_BASE_APP_TOKEN,
+                            table_id=users_table_id,
+                            performance_table_id=LARK_BASE_COMBINED_PERFORMANCE_TABLE_ID,
+                            token_manager=token_manager
+                        )
+                        user_data = get_user_data_from_lark(lark_client, users_table_id)
+                        
+                        result = get_creator_count_and_payment(
+                            parsed["creator"], 
+                            parsed["time_period"], 
+                            user_data=user_data,  # ✅ Pass user_data!
+                            lark_user_id=user_open_id
+                        )
+                        if result["success"]:
+                            response_text = f"""✅ **{result['creator']}** - Creative Payment ({result['period']})
 Videos: {result['count']}
-Total Payment: ${result['payment']}"""
-                    else:
-                        response_text = result["error"]
+Payment Rate: ${result['rate']:.2f} per video
+Total Payment: ${result['payment']:.2f}"""
+                        else:
+                            response_text = result["error"]
+                    except Exception as e:
+                        import traceback
+                        print(f"DEBUG: Error in creative payment: {e}")
+                        print(traceback.format_exc())
+                        response_text = f"❌ Error calculating payment: {str(e)}"
                 elif parsed["type"] == "language":
                     response_text = count_creatives_by_language(parsed["language"], parsed["time_period"])
                 else:
                     response_text = "❌ Unknown creative command"
                     
+
 
 
             # Unknown command fallback
@@ -336,7 +394,9 @@ Total Payment: ${result['payment']}"""
 
 
 
+
 I'm your Intentt Bot Assistant. Here's what I can do:
+
 
 
 
@@ -348,9 +408,11 @@ I'm your Intentt Bot Assistant. Here's what I can do:
 
 
 
+
 **🎨 Creative Tracker**
 • `creative count Alejandra this month` - Track creatives
 • `creative help` - See all commands
+
 
 
 
@@ -364,7 +426,9 @@ I'm your Intentt Bot Assistant. Here's what I can do:
 
 
 
+
 Type any command to get started! 🚀"""
+
 
 
         # Send response
@@ -384,13 +448,16 @@ Type any command to get started! 🚀"""
                 return jsonify({"error": str(e)}), 500
 
 
+
         return jsonify({"message": "success"}), 200
+
 
 
     # Unknown event type
     logging.warning(f"Unknown event type: {event_type}")
     print(f"DEBUG: Full request data for unknown event: {json.dumps(req_data, indent=2)}")
     return jsonify({"message": "unknown event"}), 200
+
 
 
 @app.route("/healthcheck", methods=["GET"])
@@ -407,11 +474,13 @@ def healthcheck():
     })
 
 
+
 @app.route("/meegle-webhook", methods=["POST"])
 def meegle_webhook_handler():
     """Handle Meegle webhook events (placeholder for future use)"""
     print("DEBUG: Received Meegle webhook")
     return jsonify({"message": "received"}), 200
+
 
 
 # ✅ NEW: Shutdown gracefully
@@ -428,9 +497,11 @@ def shutdown_schedulers():
         print("DEBUG: User performance scheduler stopped")
 
 
+
 # Initialize trackers and schedulers at startup
 with app.app_context():
     init_trackers()
+
 
 
 if __name__ == "__main__":
