@@ -1,6 +1,7 @@
 # creative_tracker.py - UPDATED WITH DYNAMIC PAYMENT RATES BY ROLE
 
 import re
+import os
 from datetime import datetime
 from calendar import monthrange
 from meegle_api import MeegleClient
@@ -22,8 +23,57 @@ PAYMENT_RATES_BY_ROLE = {
     "video_editor": 5.50,
 }
 
+
 # Default payment rate if role not found
 DEFAULT_PAYMENT_RATE = 13.00
+
+
+def get_user_data_from_lark(lark_base_client, users_table_id):
+    """
+    Fetch all users from Lark Base and build a lookup dictionary
+    
+    Args:
+        lark_base_client: LarkBaseClient instance
+        users_table_id: Table ID for users table (from .env)
+    
+    Returns:
+        Dictionary keyed by email with user info (name, role, department, etc.)
+    """
+    try:
+        print(f"DEBUG: Fetching users from Lark Base table: {users_table_id}")
+        
+        # Get all records from users table
+        all_records = lark_base_client._search_records(users_table_id)
+        print(f"DEBUG: Got {len(all_records)} total user records")
+        
+        user_data = {}
+        
+        for record in all_records:
+            fields = record.get("fields", {})
+            
+            # Extract user info
+            email = fields.get("email", "").lower() if fields.get("email") else None
+            name = fields.get("name", "")
+            role = fields.get("role", "")
+            department = fields.get("department", "")
+            
+            if email:
+                user_data[email] = {
+                    "name": name,
+                    "role": role,
+                    "department": department,
+                    "record_id": record.get("record_id")
+                }
+                print(f"DEBUG: Loaded user {email} - role: {role}, department: {department}")
+        
+        print(f"DEBUG: Successfully loaded {len(user_data)} users from Lark Base")
+        return user_data
+        
+    except Exception as e:
+        print(f"ERROR in get_user_data_from_lark: {e}")
+        import traceback
+        print(traceback.format_exc())
+        return {}
 
 
 def get_payment_rate_for_user(creator_name, user_data):
@@ -55,7 +105,7 @@ def get_payment_rate_for_user(creator_name, user_data):
     # Try name match
     for email, info in user_data.items():
         name = info.get("name", "").lower()
-        if creator_lower in name:
+        if creator_lower in name or name in creator_lower:
             role = info.get("role", "").lower()
             rate = PAYMENT_RATES_BY_ROLE.get(role, DEFAULT_PAYMENT_RATE)
             print(f"DEBUG: Found {creator_name} (email: {email}) with role '{role}', rate: ${rate}")
@@ -200,8 +250,10 @@ def count_creatives_by_creator(creator_name, time_period_str, lark_user_id=None)
                 print(f"DEBUG: Item {item_id} - DID NOT FIND valid Creative Production end time in period")
         response = f"""📊 Creative Stats for {creator_name.title()}
 
+
 Period: {period_name}
 Total Creatives Completed: {len(filtered_items)}
+
 
 Counted: Items that exited Creative Production during {period_name}
 Current statuses:
@@ -291,7 +343,7 @@ def get_creator_count_and_payment(creator_name, time_period_str, user_data=None,
         
         count = len(filtered_items)
         
-        # ✅ NEW: Get payment rate based on user's role
+        # ✅ FIXED: Get payment rate based on user's role from Lark Base
         payment_rate = get_payment_rate_for_user(creator_name, user_data)
         payment = count * payment_rate
         
@@ -333,6 +385,7 @@ def count_creatives_by_language(language, time_period_str):
                         break
         response = f"""📊 Creative Stats by Language
 
+
 Language: {language}
 Period: {period_name}
 Total Creatives: {len(filtered_items)}"""
@@ -354,12 +407,14 @@ def get_meegle_username_from_lark(lark_user_id):
 def get_creative_help():
     return """📊 Creative Tracker Commands
 
+
 **Count creatives by creator:**
 `creative count <name> <period>`
 Examples:
 • creative count Aure this month
 • creative count Alejandra November
 • creative count me October
+
 
 **Creator payment:**
 `creative payment <name> <period>`
@@ -368,11 +423,13 @@ Examples:
 • creative payment Alejandra last month
 • creative payment Carolina this month
 
+
 **Language breakdown:**
 `creative language <language> <period>`
 Examples:
 • creative language Spanish this month
 • creative language English November
+
 
 **Time periods:**
 • this month
@@ -380,8 +437,10 @@ Examples:
 • October
 • November 2024
 
+
 **Test API connection:**
 • creative test
+
 
 **Note:** Counts items that have exited the Creative Production node and moved beyond.
 Payment is calculated based on user role:
