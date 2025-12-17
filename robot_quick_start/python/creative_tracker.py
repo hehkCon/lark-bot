@@ -19,13 +19,13 @@ CREATOR_USER_IDS = {
 
 # Payment rates by role (in dollars per video)
 PAYMENT_RATES_BY_ROLE = {
-    "creator": 13.00,
+    "creator": 13.50,
     "video_editor": 5.50,
 }
 
 
 # Default payment rate if role not found
-DEFAULT_PAYMENT_RATE = 13.00
+DEFAULT_PAYMENT_RATE = 13.50
 
 
 def get_user_data_from_lark(lark_base_client, users_table_id):
@@ -470,5 +470,5 @@ Examples:
 
 **Note:** Counts items that have exited the Creative Production node and moved beyond.
 Payment is calculated based on user role:
-• Creators: $13 per video
+• Creators: $13.50 per video
 • Video Editors: $5.50 per video"""
