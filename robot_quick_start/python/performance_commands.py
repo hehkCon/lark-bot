@@ -4,10 +4,12 @@ Handles all performance tracking queries (perf, perf team, perf overall, perf ta
 """
 
 
+
 from datetime import datetime, timedelta
 import pytz
 import os
 from performance_target import PerformanceTarget
+
 
 
 
@@ -135,7 +137,7 @@ class PerformanceCommands:
             Tuple of (start_date, display_end_date, api_end_date) as strings "YYYY-MM-DD"
             - start_date: First day to include
             - display_end_date: Last day to DISPLAY (what was requested)
-            - api_end_date: Last day for API query (one day after display_end_date)
+            - api_end_date: Last day for API query (inclusive, no extra day added)
         """
         now = datetime.now(self.montreal_tz)
         today = now.date()
@@ -144,24 +146,23 @@ class PerformanceCommands:
         
         if "yesterday" in date_range_lower:
             yesterday = today - timedelta(days=1)
-            api_end = today
-            return yesterday.isoformat(), yesterday.isoformat(), api_end.isoformat()
+            return yesterday.isoformat(), yesterday.isoformat(), yesterday.isoformat()
         
         elif "today" in date_range_lower:
-            api_end = today + timedelta(days=1)
-            return today.isoformat(), today.isoformat(), api_end.isoformat()
+            return today.isoformat(), today.isoformat(), today.isoformat()
         
         elif "mtd" in date_range_lower or "month to date" in date_range_lower:
             month_start = today.replace(day=1)
             yesterday = today - timedelta(days=1)
-            api_end = today
-            return month_start.isoformat(), yesterday.isoformat(), api_end.isoformat()
+            return month_start.isoformat(), yesterday.isoformat(), yesterday.isoformat()
         
         elif "month" in date_range_lower:
+            # ✅ FIXED: Query ONLY December data, not including January
             first_of_this_month = today.replace(day=1)
             last_of_prev_month = first_of_this_month - timedelta(days=1)
             first_of_prev_month = last_of_prev_month.replace(day=1)
-            api_end = last_of_prev_month + timedelta(days=1)
+            # ✅ FIXED: api_end is the LAST day of the month, not the next day
+            api_end = last_of_prev_month
             return first_of_prev_month.isoformat(), last_of_prev_month.isoformat(), api_end.isoformat()
         
         elif "last" in date_range_lower:
@@ -171,14 +172,14 @@ class PerformanceCommands:
                     days = int(parts[1])
                     display_end = today - timedelta(days=1)
                     start = display_end - timedelta(days=days-1)
-                    api_end = display_end + timedelta(days=1)
+                    api_end = display_end
                     return start.isoformat(), display_end.isoformat(), api_end.isoformat()
             except (ValueError, IndexError):
                 pass
         
         display_end = today - timedelta(days=1)
         start = display_end - timedelta(days=6)
-        api_end = display_end + timedelta(days=1)
+        api_end = display_end
         return start.isoformat(), display_end.isoformat(), api_end.isoformat()
     
     def _find_user_by_email_or_name(self, target: str):
@@ -217,7 +218,7 @@ class PerformanceCommands:
         Args:
             emails: List of email addresses (lowercase)
             start_date: Start date (YYYY-MM-DD)
-            api_end_date: End date for API query (YYYY-MM-DD)
+            api_end_date: End date for API query (YYYY-MM-DD) - INCLUSIVE
         
         Returns:
             Tuple of (perf_by_email, actual_min_date, actual_max_date)
