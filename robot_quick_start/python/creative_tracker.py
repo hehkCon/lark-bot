@@ -111,7 +111,7 @@ def fetch_items_for_creator(client, creator_user_id, workspace, start_timestamp,
                     role_entries = field.get("field_value", [])
                     for entry in role_entries:
                         if entry.get("role") == CREATOR_ROLE_ID:
-                            owners = entry.get("owners", [])
+                            owners = entry.get("owners") or []
                             if creator_user_id in [str(o) for o in owners]:
                                 creator_matched = True
                                 break
