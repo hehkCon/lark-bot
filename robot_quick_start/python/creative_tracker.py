@@ -1,4 +1,4 @@
-# creative_tracker.py - FINAL VERSION: DUAL WORKSPACE + CONTENT TYPE PAYMENTS
+# creative_tracker.py - FINAL VERSION: ROLE_OWNERS MATCHING + DUAL WORKSPACE + CONTENT TYPE PAYMENTS
 
 import re
 import os
@@ -50,6 +50,9 @@ WORKSPACES = [
     }
 ]
 
+# Role ID for creator matching (same in both workspaces)
+CREATOR_ROLE_ID = "role_9e1a72"
+
 DEFAULT_PAYMENT_RATE = 13.50
 
 
@@ -85,6 +88,7 @@ def fetch_items_for_creator(client, creator_user_id, workspace, start_timestamp,
     """
     Fetch work items for a creator in a single workspace that exited
     Creative Production within the time period.
+    Matches by role_owners field with role_9e1a72.
     Returns list of matched items.
     """
     try:
@@ -101,15 +105,22 @@ def fetch_items_for_creator(client, creator_user_id, workspace, start_timestamp,
             fields = item.get("fields", [])
             creator_matched = False
 
+            # ✅ Match by role_owners with role_9e1a72
             for field in fields:
-                if field.get("field_alias") == "content_creator":
-                    if creator_user_id == str(field.get("field_value", "")):
-                        creator_matched = True
-                        break
+                if field.get("field_key") == "role_owners":
+                    role_entries = field.get("field_value", [])
+                    for entry in role_entries:
+                        if entry.get("role") == CREATOR_ROLE_ID:
+                            owners = entry.get("owners", [])
+                            if creator_user_id in [str(o) for o in owners]:
+                                creator_matched = True
+                                break
+                    break
 
             if not creator_matched:
                 continue
 
+            # Check if Creative Production exit is in the time period
             state_times = item.get("state_times", [])
             for state in state_times:
                 if state.get("name") == "Creative Production" and state.get("end_time", 0) > 0:
@@ -226,7 +237,6 @@ def count_creatives_by_creator(creator_name, time_period_str, lark_user_id=None)
         workspace_counts[workspace["name"]] = len(items)
         total += len(items)
 
-    # Build breakdown lines
     breakdown = "\n".join([f"• {name}: {count}" for name, count in workspace_counts.items() if count > 0])
     if not breakdown:
         breakdown = "• No creatives found in either workspace"
