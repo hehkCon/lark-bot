@@ -1,4 +1,4 @@
-# creative_tracker.py - UPDATED WITH FIX FOR EMAIL LIST FORMAT
+# creative_tracker.py - FINAL VERSION: DUAL WORKSPACE + CONTENT TYPE PAYMENTS
 
 import re
 import os
@@ -12,134 +12,123 @@ CREATOR_USER_IDS = {
     "aure": "7569613836605492757",
     "aure williams": "7569613836605492757",
     "alejandra": "7566221514945662485",
-    "7562186989836045843": "7562186989836045843",
+    "harry": "7562186989836045843",
     "carolina": "7581455452412628499",
+    "april": "7599935172070493716",
+    "blessing": "7599871694760644116",
+    "janett": "7600049949983788564",
+    "guillermo": "7600059664037973526",
+    "lakshmi": "7599918880215076372",
+    "giovani": "7600196845523963414",
+    "valentina": "7601310531932261909",
 }
 
+# Workspace configs
+WORKSPACES = [
+    {
+        "project_key": "68fef3aea7d53233b3285b15",
+        "type_key": "story",
+        "name": "SearchArb",
+        "content_type_field": "media_type",
+        "payment_rates": {
+            "ugc video": 13.50,
+            "video editor": 5.50,
+            "static image": 5.50,
+        }
+    },
+    {
+        "project_key": "69730343e177229598681c13",
+        "type_key": "story",
+        "name": "External",
+        "content_type_field": "content_type",
+        "payment_rates": {
+            "ugc": 50.00,
+            "external - search arb": 13.50,
+            "external - editor": 11.00,
+            "lead gen": 35.00,
+        }
+    }
+]
 
-# Payment rates by role (in dollars per video)
-PAYMENT_RATES_BY_ROLE = {
-    "creator": 13.50,
-    "video_editor": 5.50,
-}
-
-
-# Default payment rate if role not found
 DEFAULT_PAYMENT_RATE = 13.50
 
 
-def get_user_data_from_lark(lark_base_client, users_table_id):
+def get_payment_rate_from_item(item, workspace_config):
     """
-    Fetch all users from Lark Base and build a lookup dictionary
-    
-    Args:
-        lark_base_client: LarkBaseClient instance
-        users_table_id: Table ID for users table (from .env)
-    
-    Returns:
-        Dictionary keyed by email with user info (name, role, department, etc.)
+    Read content_type or media_type label from item and return matching rate.
+    Matches by label e.g. {"label": "UGC", "value": "xxx"}
+    """
+    field_alias = workspace_config["content_type_field"]
+    payment_rates = workspace_config["payment_rates"]
+
+    fields = item.get("fields", [])
+    for field in fields:
+        if field.get("field_alias") == field_alias:
+            field_value = field.get("field_value", "")
+            label = ""
+            if isinstance(field_value, dict):
+                label = field_value.get("label", "").lower().strip()
+            elif isinstance(field_value, list) and len(field_value) > 0:
+                label = field_value[0].get("label", "").lower().strip()
+            elif isinstance(field_value, str):
+                label = field_value.lower().strip()
+
+            rate = payment_rates.get(label, DEFAULT_PAYMENT_RATE)
+            print(f"DEBUG: {field_alias} label='{label}' → rate=${rate}")
+            return rate, label
+
+    print(f"DEBUG: No {field_alias} field found on item, using default ${DEFAULT_PAYMENT_RATE}")
+    return DEFAULT_PAYMENT_RATE, "unknown"
+
+
+def fetch_items_for_creator(client, creator_user_id, workspace, start_timestamp, end_timestamp):
+    """
+    Fetch work items for a creator in a single workspace that exited
+    Creative Production within the time period.
+    Returns list of matched items.
     """
     try:
-        print(f"DEBUG: Fetching users from Lark Base table: {users_table_id}")
-        
-        # Get all records from users table
-        all_records = lark_base_client._search_records(users_table_id)
-        print(f"DEBUG: Got {len(all_records)} total user records")
-        
-        user_data = {}
-        
-        for record in all_records:
-            fields = record.get("fields", {})
-            
-            # ✅ FIXED: Extract email from list format (like [{"text": "email@domain.com"}])
-            email_field = fields.get("email", [])
-            email = ""
-            if isinstance(email_field, list) and len(email_field) > 0:
-                email = email_field[0].get("text", "").lower() if isinstance(email_field[0], dict) else str(email_field[0]).lower()
-            elif isinstance(email_field, str):
-                email = email_field.lower()
-            
-            # ✅ FIXED: Extract name from list format
-            name_field = fields.get("name", [])
-            name = ""
-            if isinstance(name_field, list) and len(name_field) > 0:
-                name = name_field[0].get("text", "") if isinstance(name_field[0], dict) else str(name_field[0])
-            elif isinstance(name_field, str):
-                name = name_field
-            
-            # ✅ FIXED: Extract role from list format
-            role_field = fields.get("role", [])
-            role = ""
-            if isinstance(role_field, list) and len(role_field) > 0:
-                role = role_field[0].get("text", "") if isinstance(role_field[0], dict) else str(role_field[0])
-            elif isinstance(role_field, str):
-                role = role_field
-            
-            # ✅ FIXED: Extract department from list format
-            department_field = fields.get("department", [])
-            department = ""
-            if isinstance(department_field, list) and len(department_field) > 0:
-                department = department_field[0].get("text", "") if isinstance(department_field[0], dict) else str(department_field[0])
-            elif isinstance(department_field, str):
-                department = department_field
-            
-            if email:
-                user_data[email] = {
-                    "name": name,
-                    "role": role,
-                    "department": department,
-                    "record_id": record.get("record_id")
-                }
-                print(f"DEBUG: Loaded user {email} - name: {name}, role: {role}, department: {department}")
-        
-        print(f"DEBUG: Successfully loaded {len(user_data)} users from Lark Base")
-        return user_data
-        
+        result = client.search_work_items(filters={
+            "project_key": workspace["project_key"],
+            "type_key": workspace["type_key"]
+        })
+        all_items = result.get("data", [])
+        print(f"DEBUG: [{workspace['name']}] Got {len(all_items)} total items")
+
+        matched = []
+        for item in all_items:
+            item_id = item.get("id")
+            fields = item.get("fields", [])
+            creator_matched = False
+
+            for field in fields:
+                if field.get("field_alias") == "content_creator":
+                    if creator_user_id == str(field.get("field_value", "")):
+                        creator_matched = True
+                        break
+
+            if not creator_matched:
+                continue
+
+            state_times = item.get("state_times", [])
+            for state in state_times:
+                if state.get("name") == "Creative Production" and state.get("end_time", 0) > 0:
+                    end_time = state["end_time"]
+                    if start_timestamp <= end_time <= end_timestamp:
+                        matched.append(item)
+                        completion_date = datetime.fromtimestamp(end_time / 1000)
+                        print(f"DEBUG: [{workspace['name']}] ✅ Item {item_id} counted - exited at {completion_date}")
+                        break
+                    else:
+                        print(f"DEBUG: [{workspace['name']}] Item {item_id} - exit out of period")
+
+        print(f"DEBUG: [{workspace['name']}] {len(matched)} items matched for creator {creator_user_id}")
+        return matched
+
     except Exception as e:
-        print(f"ERROR in get_user_data_from_lark: {e}")
         import traceback
-        print(traceback.format_exc())
-        return {}
-
-
-def get_payment_rate_for_user(creator_name, user_data):
-    """
-    Get payment rate based on user's role from user_data table
-    
-    Args:
-        creator_name: Name or email of the creator
-        user_data: Dictionary of users keyed by email (from Lark Base)
-    
-    Returns:
-        Payment rate in dollars (float)
-    """
-    if not user_data:
-        print(f"DEBUG: user_data is None, using default rate ${DEFAULT_PAYMENT_RATE}")
-        return DEFAULT_PAYMENT_RATE
-    
-    # Try to find the user in user_data
-    creator_lower = creator_name.lower()
-    
-    # First try exact email match
-    if creator_lower in user_data:
-        user_info = user_data[creator_lower]
-        role = user_info.get("role", "").lower()
-        rate = PAYMENT_RATES_BY_ROLE.get(role, DEFAULT_PAYMENT_RATE)
-        print(f"DEBUG: Found {creator_name} with role '{role}', rate: ${rate}")
-        return rate
-    
-    # Try name match
-    for email, info in user_data.items():
-        name = info.get("name", "").lower()
-        if creator_lower in name or name in creator_lower:
-            role = info.get("role", "").lower()
-            rate = PAYMENT_RATES_BY_ROLE.get(role, DEFAULT_PAYMENT_RATE)
-            print(f"DEBUG: Found {creator_name} (email: {email}) with role '{role}', rate: ${rate}")
-            return rate
-    
-    # User not found, use default
-    print(f"DEBUG: {creator_name} not found in user_data, using default rate ${DEFAULT_PAYMENT_RATE}")
-    return DEFAULT_PAYMENT_RATE
+        print(f"ERROR fetching [{workspace['name']}]: {e}\n{traceback.format_exc()}")
+        return []
 
 
 def parse_creative_command(text):
@@ -177,7 +166,7 @@ def parse_time_period(time_period_str):
         last_day = monthrange(now.year, now.month)[1]
         end_date = datetime(now.year, now.month, last_day, 23, 59, 59)
         period_name = now.strftime("%B %Y")
-    elif "last month" in time_lower or "month" in time_lower and "this" not in time_lower:
+    elif "last month" in time_lower or ("month" in time_lower and "this" not in time_lower):
         if now.month == 1:
             month, year = 12, now.year - 1
         else:
@@ -212,107 +201,56 @@ def parse_time_period(time_period_str):
 
 
 def count_creatives_by_creator(creator_name, time_period_str, lark_user_id=None):
-    """Returns formatted response with creative count (original function)"""
+    """Returns formatted response with creative count across both workspaces"""
     client = MeegleClient()
     start_date, end_date, period_name = parse_time_period(time_period_str)
     start_timestamp = int(start_date.timestamp() * 1000)
     end_timestamp = int(end_date.timestamp() * 1000)
-    print(f"DEBUG: Period: {period_name}")
-    print(f"DEBUG: Start timestamp: {start_timestamp} ({start_date})")
-    print(f"DEBUG: End timestamp: {end_timestamp} ({end_date})")
+
     if creator_name.lower() in ["me", "i"]:
         creator_name = get_meegle_username_from_lark(lark_user_id)
         if not creator_name:
-            return f"❌ Could not find your Meegle username. Please use your Meegle name instead."
+            return "❌ Could not find your Meegle username. Please use your Meegle name instead."
+
     creator_lookup = creator_name.lower()
     creator_user_id = CREATOR_USER_IDS.get(creator_lookup)
     if not creator_user_id:
-        return f"❌ Could not find user ID for '{creator_name}'. Known creators: {', '.join([k.title() for k in CREATOR_USER_IDS.keys() if not k.isdigit()])}"
-    print(f"DEBUG: Searching for creator '{creator_name}' with user_id: {creator_user_id}")
+        known = ', '.join([k.title() for k in CREATOR_USER_IDS.keys() if len(k) > 3])
+        return f"❌ Could not find user ID for '{creator_name}'. Known creators: {known}"
 
-    valid_statuses = [
-        "Compliance Review",
-        "Rejected Creative - Revision",
-        "Ready To Launch",
-        "Creative Performance Monitoring"
-    ]
-    try:
-        result = client.search_work_items(filters=None)
-        all_items = result.get("data", [])
-        print(f"DEBUG: Got {len(all_items)} total work items")
-        filtered_items = []
-        for item in all_items:
-            item_id = item.get('id')
-            item_name = item.get('name')
-            fields = item.get("fields", [])
-            creator_matched = False
-            found_creator_value = None
-            for field in fields:
-                if field.get("field_alias") == "content_creator":
-                    creator_value = str(field.get("field_value", ""))
-                    found_creator_value = creator_value
-                    print(f"DEBUG: Item {item_id} content_creator={creator_value} (want {creator_user_id})")
-                    if creator_user_id == creator_value:
-                        creator_matched = True
-                        break
-            if not creator_matched:
-                print(f"DEBUG: Item {item_id} - SKIPPED: creator did not match (found {found_creator_value})")
-                continue
-            state_times = item.get("state_times", [])
-            matched_state = False
-            for state in state_times:
-                state_name = state.get("name", "")
-                end_time = state.get("end_time", 0)
-                print(f"DEBUG: Item {item_id} state_name={state_name} end_time={end_time}")
-                if state_name == "Creative Production" and end_time > 0:
-                    if start_timestamp <= end_time <= end_timestamp:
-                        filtered_items.append(item)
-                        matched_state = True
-                        completion_date = datetime.fromtimestamp(end_time / 1000)
-                        print(f"DEBUG: ✅ COUNTED item {item_id} for period - exited Creative Production at {completion_date}")
-                    else:
-                        print(f"DEBUG: Item {item_id} - Creative Production exit out of period")
-            if not matched_state:
-                print(f"DEBUG: Item {item_id} - DID NOT FIND valid Creative Production end time in period")
-        response = f"""📊 Creative Stats for {creator_name.title()}
+    # Search both workspaces
+    workspace_counts = {}
+    total = 0
+    for workspace in WORKSPACES:
+        items = fetch_items_for_creator(client, creator_user_id, workspace, start_timestamp, end_timestamp)
+        workspace_counts[workspace["name"]] = len(items)
+        total += len(items)
 
+    # Build breakdown lines
+    breakdown = "\n".join([f"• {name}: {count}" for name, count in workspace_counts.items() if count > 0])
+    if not breakdown:
+        breakdown = "• No creatives found in either workspace"
+
+    response = f"""📊 Creative Stats for {creator_name.title()}
 
 Period: {period_name}
-Total Creatives Completed: {len(filtered_items)}
+Total Creatives Completed: {total}
 
+{breakdown}
 
-Counted: Items that exited Creative Production during {period_name}
-Current statuses:
-• Compliance Review
-• Rejected Creative - Revision
-• Ready To Launch
-• Creative Performance Monitoring"""
-        return response
-    except Exception as e:
-        import traceback
-        print(f"ERROR: Meegle API error: {e}")
-        print(f"Traceback: {traceback.format_exc()}")
-        return f"❌ Error fetching creative data: {str(e)}"
+Counted: Items that exited Creative Production during {period_name}"""
+    return response
 
 
 def get_creator_count_and_payment(creator_name, time_period_str, user_data=None, lark_user_id=None):
     """
-    Returns dict with creator count and payment calculation
-    
-    Args:
-        creator_name: Name of the creator
-        time_period_str: Time period string (e.g., "this month")
-        user_data: Dictionary of users from Lark Base (for role lookup)
-        lark_user_id: Lark user ID (optional, for "me" command)
+    Returns dict with count + payment breakdown across both workspaces and content types
     """
     client = MeegleClient()
     start_date, end_date, period_name = parse_time_period(time_period_str)
     start_timestamp = int(start_date.timestamp() * 1000)
     end_timestamp = int(end_date.timestamp() * 1000)
-    
-    print(f"DEBUG: Payment calculation - Period: {period_name}")
-    print(f"DEBUG: Start timestamp: {start_timestamp}, End timestamp: {end_timestamp}")
-    
+
     if creator_name.lower() in ["me", "i"]:
         creator_name = get_meegle_username_from_lark(lark_user_id)
         if not creator_name:
@@ -320,78 +258,54 @@ def get_creator_count_and_payment(creator_name, time_period_str, user_data=None,
                 "success": False,
                 "error": "❌ Could not find your Meegle username. Please use your Meegle name instead."
             }
-    
+
     creator_lookup = creator_name.lower()
     creator_user_id = CREATOR_USER_IDS.get(creator_lookup)
-    
     if not creator_user_id:
-        known_creators = ', '.join([k.title() for k in CREATOR_USER_IDS.keys() if not k.isdigit()])
+        known = ', '.join([k.title() for k in CREATOR_USER_IDS.keys() if len(k) > 3])
         return {
             "success": False,
-            "error": f"❌ Could not find user ID for '{creator_name}'. Known creators: {known_creators}"
+            "error": f"❌ Could not find user ID for '{creator_name}'. Known creators: {known}"
         }
-    
-    print(f"DEBUG: Searching for creator '{creator_name}' with user_id: {creator_user_id}")
-    
-    try:
-        result = client.search_work_items(filters=None)
-        all_items = result.get("data", [])
-        print(f"DEBUG: Got {len(all_items)} total work items")
-        
-        filtered_items = []
-        for item in all_items:
-            item_id = item.get('id')
-            fields = item.get("fields", [])
-            creator_matched = False
-            
-            # Check if creator matches
-            for field in fields:
-                if field.get("field_alias") == "content_creator":
-                    creator_value = str(field.get("field_value", ""))
-                    if creator_user_id == creator_value:
-                        creator_matched = True
-                        break
-            
-            if not creator_matched:
-                continue
-            
-            # Check if Creative Production exit is in the time period
-            state_times = item.get("state_times", [])
-            for state in state_times:
-                state_name = state.get("name", "")
-                end_time = state.get("end_time", 0)
-                
-                if state_name == "Creative Production" and end_time > 0:
-                    if start_timestamp <= end_time <= end_timestamp:
-                        filtered_items.append(item)
-                        print(f"DEBUG: ✅ Item {item_id} counted for payment")
-                        break
-        
-        count = len(filtered_items)
-        
-        # ✅ FIXED: Get payment rate based on user's role from Lark Base
-        payment_rate = get_payment_rate_for_user(creator_name, user_data)
-        payment = count * payment_rate
-        
-        print(f"DEBUG: Final count: {count}, Rate: ${payment_rate}, Payment: ${payment}")
-        
-        return {
-            "success": True,
-            "creator": creator_name.title(),
-            "period": period_name,
-            "count": count,
-            "payment": payment,
-            "rate": payment_rate
+
+    total_payment = 0.0
+    total_count = 0
+    workspace_breakdown = {}
+
+    for workspace in WORKSPACES:
+        items = fetch_items_for_creator(client, creator_user_id, workspace, start_timestamp, end_timestamp)
+        if not items:
+            continue
+
+        type_breakdown = {}
+        workspace_payment = 0.0
+
+        for item in items:
+            rate, label = get_payment_rate_from_item(item, workspace)
+            workspace_payment += rate
+            if label not in type_breakdown:
+                type_breakdown[label] = {"count": 0, "payment": 0.0}
+            type_breakdown[label]["count"] += 1
+            type_breakdown[label]["payment"] += rate
+
+        workspace_breakdown[workspace["name"]] = {
+            "count": len(items),
+            "payment": workspace_payment,
+            "types": type_breakdown
         }
-        
-    except Exception as e:
-        import traceback
-        print(f"ERROR: Meegle API error: {e}")
-        print(f"Traceback: {traceback.format_exc()}")
-        return {
-            "success": False,
-            "error": f"❌ Error fetching creative data: {str(e)}"
-        }
+        total_count += len(items)
+        total_payment += workspace_payment
+
+    print(f"DEBUG: Total count={total_count}, Total payment=${total_payment}")
+
+    return {
+        "success": True,
+        "creator": creator_name.title(),
+        "period": period_name,
+        "count": total_count,
+        "payment": total_payment,
+        "workspace_breakdown": workspace_breakdown
+    }
 
 
 def count_creatives_by_language(language, time_period_str):
@@ -411,15 +325,13 @@ def count_creatives_by_language(language, time_period_str):
                         break
         response = f"""📊 Creative Stats by Language
 
-
 Language: {language}
 Period: {period_name}
 Total Creatives: {len(filtered_items)}"""
         return response
     except Exception as e:
         import traceback
-        print(f"ERROR: Meegle API error: {e}")
-        print(f"Traceback: {traceback.format_exc()}")
+        print(f"ERROR: {e}\n{traceback.format_exc()}")
         return f"❌ Error fetching creative data: {str(e)}"
 
 
@@ -433,22 +345,19 @@ def get_meegle_username_from_lark(lark_user_id):
 def get_creative_help():
     return """📊 Creative Tracker Commands
 
-
 **Count creatives by creator:**
 `creative count <name> <period>`
 Examples:
 • creative count Aure this month
 • creative count Alejandra November
-• creative count me October
-
+• creative count Lakshmi this month
 
 **Creator payment:**
 `creative payment <name> <period>`
 Examples:
 • creative payment Aure this month
-• creative payment Alejandra last month
+• creative payment Lakshmi last month
 • creative payment Carolina this month
-
 
 **Language breakdown:**
 `creative language <language> <period>`
@@ -456,19 +365,20 @@ Examples:
 • creative language Spanish this month
 • creative language English November
 
-
 **Time periods:**
 • this month
-• last month (or just "month")
+• last month
 • October
 • November 2024
-
 
 **Test API connection:**
 • creative test
 
+**Note:** Counts items that exited Creative Production across both workspaces.
 
-**Note:** Counts items that have exited the Creative Production node and moved beyond.
-Payment is calculated based on user role:
-• Creators: $13.50 per video
-• Video Editors: $5.50 per video"""
+SearchArb rates (media_type):
+• UGC Video: $13.50 | Video Editor: $5.50 | Static Image: $5.50
+
+External rates (content_type):
+• UGC: $50.00 | Lead Gen: $35.00
+• External - Search Arb: $13.50 | External - Editor: $11.00"""
