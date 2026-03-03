@@ -1,4 +1,4 @@
-# ✅ server.py - UPDATED: DUAL WORKSPACE CREATIVE PAYMENTS
+# ✅ server.py - UPDATED: DUAL WORKSPACE CREATIVE PAYMENTS + EDITOR ROLE
 
 import json
 import logging
@@ -298,13 +298,21 @@ def callback_event_handler():
                                     breakdown_lines.append(
                                         f"  • {label.title()} x{type_data['count']} = ${type_data['payment']:.2f}"
                                     )
+                                # Show editor role if any
+                                if ws_data.get("editor_count", 0) > 0:
+                                    breakdown_lines.append(f"  Editor roles: {ws_data['editor_count']}")
+                                    breakdown_lines.append(
+                                        f"  • Video Editor x{ws_data['editor_count']} = ${ws_data['editor_payment']:.2f}"
+                                    )
                                 breakdown_lines.append(f"  Subtotal: ${ws_data['payment']:.2f}")
 
                             breakdown_text = "\n".join(breakdown_lines) if breakdown_lines else "• No creatives found"
+                            editor_summary = f"\nTotal Editor Roles: {result['editor_count']}" if result.get("editor_count", 0) > 0 else ""
 
                             response_text = (
                                 f"💰 Creative Payment — {result['creator']} ({result['period']})\n"
                                 f"\nTotal Videos: {result['count']}"
+                                f"{editor_summary}"
                                 f"{breakdown_text}\n"
                                 f"\n━━━━━━━━━━━━━━━━"
                                 f"\n💵 Total Payment: ${result['payment']:.2f}"

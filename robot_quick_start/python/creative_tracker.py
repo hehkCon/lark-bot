@@ -1,4 +1,4 @@
-# creative_tracker.py - FINAL VERSION: ROLE_OWNERS MATCHING + DUAL WORKSPACE + CONTENT TYPE PAYMENTS
+# creative_tracker.py - CREATOR + EDITOR ROLES, DUAL WORKSPACE, CONTENT TYPE PAYMENTS
 
 import re
 import os
@@ -50,8 +50,12 @@ WORKSPACES = [
     }
 ]
 
-# Role ID for creator matching (same in both workspaces)
+# Role IDs (same in both workspaces)
 CREATOR_ROLE_ID = "role_9e1a72"
+EDITOR_ROLE_ID = "role_0be9df"
+
+# Editor role payment rate (per item where user is assigned as editor)
+EDITOR_ROLE_RATE = 11.00
 
 DEFAULT_PAYMENT_RATE = 13.50
 
@@ -59,7 +63,6 @@ DEFAULT_PAYMENT_RATE = 13.50
 def get_payment_rate_from_item(item, workspace_config):
     """
     Read content_type or media_type label from item and return matching rate.
-    Matches by label e.g. {"label": "UGC", "value": "xxx"}
     """
     field_alias = workspace_config["content_type_field"]
     payment_rates = workspace_config["payment_rates"]
@@ -86,10 +89,8 @@ def get_payment_rate_from_item(item, workspace_config):
 
 def fetch_items_for_creator(client, creator_user_id, workspace, start_timestamp, end_timestamp):
     """
-    Fetch work items for a creator in a single workspace that exited
-    Creative Production within the time period.
-    Matches by role_owners field with role_9e1a72.
-    Returns list of matched items.
+    Fetch work items where user is assigned as creator (role_9e1a72)
+    that exited Creative Production within the time period.
     """
     try:
         result = client.search_work_items(filters={
@@ -105,7 +106,6 @@ def fetch_items_for_creator(client, creator_user_id, workspace, start_timestamp,
             fields = item.get("fields", [])
             creator_matched = False
 
-            # ✅ Match by role_owners with role_9e1a72
             for field in fields:
                 if field.get("field_key") == "role_owners":
                     role_entries = field.get("field_value", [])
@@ -120,7 +120,6 @@ def fetch_items_for_creator(client, creator_user_id, workspace, start_timestamp,
             if not creator_matched:
                 continue
 
-            # Check if Creative Production exit is in the time period
             state_times = item.get("state_times", [])
             for state in state_times:
                 if state.get("name") == "Creative Production" and state.get("end_time", 0) > 0:
@@ -140,6 +139,27 @@ def fetch_items_for_creator(client, creator_user_id, workspace, start_timestamp,
         import traceback
         print(f"ERROR fetching [{workspace['name']}]: {e}\n{traceback.format_exc()}")
         return []
+
+
+def count_role_occurrences(items, user_id, role_id):
+    """
+    Count how many items have the given user_id under role_owners with given role_id.
+    Used to count video editor role assignments.
+    """
+    count = 0
+    for item in items:
+        fields = item.get("fields", [])
+        for field in fields:
+            if field.get("field_key") == "role_owners":
+                role_entries = field.get("field_value", [])
+                for entry in role_entries:
+                    if entry.get("role") == role_id:
+                        owners = entry.get("owners") or []
+                        if user_id in [str(o) for o in owners]:
+                            count += 1
+                            break
+                break
+    return count
 
 
 def parse_creative_command(text):
@@ -229,7 +249,6 @@ def count_creatives_by_creator(creator_name, time_period_str, lark_user_id=None)
         known = ', '.join([k.title() for k in CREATOR_USER_IDS.keys() if len(k) > 3])
         return f"❌ Could not find user ID for '{creator_name}'. Known creators: {known}"
 
-    # Search both workspaces
     workspace_counts = {}
     total = 0
     for workspace in WORKSPACES:
@@ -254,7 +273,8 @@ Counted: Items that exited Creative Production during {period_name}"""
 
 def get_creator_count_and_payment(creator_name, time_period_str, user_data=None, lark_user_id=None):
     """
-    Returns dict with count + payment breakdown across both workspaces and content types
+    Returns dict with count + payment breakdown across both workspaces.
+    Includes editor role payment ($11 per item where user is assigned as editor).
     """
     client = MeegleClient()
     start_date, end_date, period_name = parse_time_period(time_period_str)
@@ -280,12 +300,16 @@ def get_creator_count_and_payment(creator_name, time_period_str, user_data=None,
 
     total_payment = 0.0
     total_count = 0
+    total_editor_count = 0
     workspace_breakdown = {}
 
     for workspace in WORKSPACES:
         items = fetch_items_for_creator(client, creator_user_id, workspace, start_timestamp, end_timestamp)
-        if not items:
-            continue
+
+        # Count editor role occurrences in these items
+        editor_count = count_role_occurrences(items, creator_user_id, EDITOR_ROLE_ID)
+        editor_payment = editor_count * EDITOR_ROLE_RATE
+        total_editor_count += editor_count
 
         type_breakdown = {}
         workspace_payment = 0.0
@@ -298,21 +322,29 @@ def get_creator_count_and_payment(creator_name, time_period_str, user_data=None,
             type_breakdown[label]["count"] += 1
             type_breakdown[label]["payment"] += rate
 
-        workspace_breakdown[workspace["name"]] = {
-            "count": len(items),
-            "payment": workspace_payment,
-            "types": type_breakdown
-        }
+        # Add editor payment to workspace subtotal
+        workspace_payment += editor_payment
+
+        if items or editor_count > 0:
+            workspace_breakdown[workspace["name"]] = {
+                "count": len(items),
+                "payment": workspace_payment,
+                "editor_count": editor_count,
+                "editor_payment": editor_payment,
+                "types": type_breakdown
+            }
+
         total_count += len(items)
         total_payment += workspace_payment
 
-    print(f"DEBUG: Total count={total_count}, Total payment=${total_payment}")
+    print(f"DEBUG: Total count={total_count}, Editor count={total_editor_count}, Total payment=${total_payment}")
 
     return {
         "success": True,
         "creator": creator_name.title(),
         "period": period_name,
         "count": total_count,
+        "editor_count": total_editor_count,
         "payment": total_payment,
         "workspace_breakdown": workspace_breakdown
     }
@@ -379,7 +411,7 @@ Examples:
 • this month
 • last month
 • October
-• November 2024
+• November 2025
 
 **Test API connection:**
 • creative test
@@ -390,5 +422,7 @@ SearchArb rates (media_type):
 • UGC Video: $13.50 | Video Editor: $5.50 | Lead Gen: $35.00
 
 External rates (content_type):
-• UGC: $35.00 | Lead Gen: $35.00 
-• External - Search Arb: $13.50 | External - Editor: $11.00"""
+• UGC: $35.00 | Lead Gen: $35.00
+• External - Search Arb: $13.50 | External - Editor: $11.00
+
+Editor role: $11.00 per item (added on top of creator payment)"""
