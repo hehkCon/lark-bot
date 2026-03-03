@@ -1,4 +1,4 @@
-# ✅ server.py - UPDATED: DUAL WORKSPACE CREATIVE PAYMENTS + EDITOR ROLE
+# ✅ server.py - UPDATED: SEPARATE CREATOR + EDITOR ROLE PAYMENTS
 
 import json
 import logging
@@ -290,28 +290,37 @@ def callback_event_handler():
                             lark_user_id=user_open_id
                         )
                         if result["success"]:
-                            # Build workspace breakdown
                             breakdown_lines = []
                             for ws_name, ws_data in result.get("workspace_breakdown", {}).items():
-                                breakdown_lines.append(f"\n📁 {ws_name} ({ws_data['count']} videos)")
+                                creator_count = ws_data.get("creator_count", 0)
+                                editor_count = ws_data.get("editor_count", 0)
+                                breakdown_lines.append(f"\n📁 {ws_name} ({creator_count} videos as creator)")
+
+                                # Content type breakdown
                                 for label, type_data in ws_data.get("types", {}).items():
                                     breakdown_lines.append(
                                         f"  • {label.title()} x{type_data['count']} = ${type_data['payment']:.2f}"
                                     )
-                                # Show editor role if any
-                                if ws_data.get("editor_count", 0) > 0:
-                                    breakdown_lines.append(f"  Editor roles: {ws_data['editor_count']}")
-                                    breakdown_lines.append(
-                                        f"  • Video Editor x{ws_data['editor_count']} = ${ws_data['editor_payment']:.2f}"
-                                    )
-                                breakdown_lines.append(f"  Subtotal: ${ws_data['payment']:.2f}")
 
-                            breakdown_text = "\n".join(breakdown_lines) if breakdown_lines else "• No creatives found"
-                            editor_summary = f"\nTotal Editor Roles: {result['editor_count']}" if result.get("editor_count", 0) > 0 else ""
+                                # Editor role breakdown (separate)
+                                if editor_count > 0:
+                                    breakdown_lines.append(f"  Video Editor role: {editor_count} items")
+                                    breakdown_lines.append(
+                                        f"  • Video Editor x{editor_count} = ${ws_data['editor_payment']:.2f}"
+                                    )
+
+                                ws_total = ws_data["creator_payment"] + ws_data["editor_payment"]
+                                breakdown_lines.append(f"  Subtotal: ${ws_total:.2f}")
+
+                            breakdown_text = "\n".join(breakdown_lines) if breakdown_lines else "\n• No creatives found"
+                            editor_summary = (
+                                f"\nTotal Editor Roles: {result['editor_count']}"
+                                if result.get("editor_count", 0) > 0 else ""
+                            )
 
                             response_text = (
                                 f"💰 Creative Payment — {result['creator']} ({result['period']})\n"
-                                f"\nTotal Videos: {result['count']}"
+                                f"\nTotal Videos: {result['count']} (as creator)"
                                 f"{editor_summary}"
                                 f"{breakdown_text}\n"
                                 f"\n━━━━━━━━━━━━━━━━"
