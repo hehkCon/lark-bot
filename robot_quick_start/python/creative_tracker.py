@@ -33,7 +33,7 @@ WORKSPACES = [
         "payment_rates": {
             "ugc video": 13.50,
             "video editor": 5.50,
-            "static image": 5.50,
+            "lead gen": 35.00,
         }
     },
     {
@@ -42,7 +42,7 @@ WORKSPACES = [
         "name": "External",
         "content_type_field": "content_type",
         "payment_rates": {
-            "ugc": 50.00,
+            "ugc": 35.00,
             "external - search arb": 13.50,
             "external - editor": 11.00,
             "lead gen": 35.00,
@@ -387,8 +387,8 @@ Examples:
 **Note:** Counts items that exited Creative Production across both workspaces.
 
 SearchArb rates (media_type):
-• UGC Video: $13.50 | Video Editor: $5.50 | Static Image: $5.50
+• UGC Video: $13.50 | Video Editor: $5.50 | Lead Gen: $35.00
 
 External rates (content_type):
-• UGC: $50.00 | Lead Gen: $35.00
+• UGC: $35.00 | Lead Gen: $35.00 
 • External - Search Arb: $13.50 | External - Editor: $11.00"""
