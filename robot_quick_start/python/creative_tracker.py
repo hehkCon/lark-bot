@@ -26,7 +26,7 @@ CREATOR_USER_IDS = {
     "eduardo":	"7602243156662308374",
     "octokani":	"7602308678007393814",
     "nicole": "7605694135588163094",
-    "Shonna": "7610953423281720854"
+    "shonna": "7610953423281720854"
 }
 
 # Workspace configs
