@@ -122,7 +122,7 @@ def fetch_items_by_role(client, user_id, role_id, workspace, start_timestamp, en
 
             for field in fields:
                 if field.get("field_key") == "role_owners":
-                    role_entries = field.get("field_value", [])
+                    role_entries = field.get("field_value") or []
                     for entry in role_entries:
                         if entry.get("role") == role_id:
                             owners = entry.get("owners") or []
@@ -423,7 +423,7 @@ SearchArb rates (media_type):
 • UGC Video: $13.50 | Video Editor: $5.50 | Lead Gen: $35.00
 
 External rates (content_type):
-• UGC: $35.00 | Lead Gen: $35.00
+• UGC - v2: $40.00 | UGC: $35.00 | Lead Gen: $35.00
 • External - Search Arb: $13.50 | External - Editor: $11.00
 
 Editor role: $11.00 per item (tracked separately from creator role)"""
