@@ -60,6 +60,7 @@ WORKSPACES = [
             "external - search arb": 13.50,
             "external - editor": 11.00,
             "lead gen": 35.00,
+            "ugc - v2": 40.00
         }
     }
 ]
